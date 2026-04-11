@@ -997,7 +997,11 @@ export default function OrdersPage() {
                     <td className="px-3 py-2 whitespace-nowrap">
                       {(() => {
                         if (claimMode === "claimed") {
-                          return <span className="font-medium text-emerald-400">Claimed</span>;
+                          return (
+                            <span className="rounded-lg bg-zinc-700/80 px-2.5 py-1 text-xs font-semibold text-zinc-300">
+                              Claimed
+                            </span>
+                          );
                         }
                         if (claimMode === "claim") {
                           return (
@@ -1005,7 +1009,7 @@ export default function OrdersPage() {
                               type="button"
                               disabled={savingClaim === r.invoiceNumber}
                               onClick={() => claimPickupOrder(r.invoiceNumber)}
-                              className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
+                              className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"
                             >
                               {savingClaim === r.invoiceNumber ? "…" : "Claim"}
                             </button>
