@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { deleteOrdersDay, readOrdersDay, removeOrdersIndexDate } from "@/data/admin/orders";
 import { loadDeliveryTracking, loadOrderAdjustments, loadOrdersIndex, saveDeliveryTracking, saveOrderAdjustments } from "@/data/admin/storage";
+import { requireApiAnyPermission, requireApiPermission } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
+  const auth = await requireApiAnyPermission(req, ["import", "orders", "salesReport", "delivery"]);
+  if (auth instanceof NextResponse) return auth;
   const url = new URL(req.url);
   const date = url.searchParams.get("date");
 
@@ -20,6 +23,8 @@ export async function GET(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  const auth = await requireApiPermission(req, "import");
+  if (auth instanceof NextResponse) return auth;
   const url = new URL(req.url);
   const date = url.searchParams.get("date");
   if (!date) return NextResponse.json({ error: "Missing `date`." }, { status: 400 });

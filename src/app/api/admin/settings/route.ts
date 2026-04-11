@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { roundWeight2 } from "@/data/admin/productSettings";
 import { loadAdminSettings, saveAdminSettings } from "@/data/admin/storage";
 import type { AdminProductItem, AdminSettings } from "@/data/admin/types";
+import { requireApiPermission, requireApiSession } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -71,12 +72,16 @@ function normalizePackages(v: unknown): Array<{ name: string; code: string; pric
   return out.filter((p) => (seen.has(p.code) ? false : (seen.add(p.code), true)));
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const auth = await requireApiSession(req);
+  if (auth instanceof NextResponse) return auth;
   const settings = loadAdminSettings();
   return NextResponse.json({ settings });
 }
 
 export async function POST(req: Request) {
+  const auth = await requireApiPermission(req, "settings");
+  if (auth instanceof NextResponse) return auth;
   const body = (await req.json()) as SettingsBody;
 
   const current = loadAdminSettings();

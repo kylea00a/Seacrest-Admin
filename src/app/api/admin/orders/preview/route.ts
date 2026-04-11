@@ -6,6 +6,7 @@ import { productNamesFromSettings } from "@/data/admin/productSettings";
 import { saveOrdersStaging } from "@/data/admin/orders";
 import { loadAdminSettings } from "@/data/admin/storage";
 import type { OrdersImportSummary } from "@/data/admin/types";
+import { requireApiPermission } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -16,6 +17,8 @@ function isDateOnly(v: unknown): v is string {
 }
 
 export async function POST(req: Request) {
+  const auth = await requireApiPermission(req, "import");
+  if (auth instanceof NextResponse) return auth;
   const form = await req.formData();
   const file = form.get("file");
   const date = form.get("date");

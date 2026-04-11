@@ -7,6 +7,7 @@ import {
   savePettyCashState,
 } from "@/data/admin/storage";
 import type { PettyCashRequest, PettyCashRequestStatus } from "@/data/admin/types";
+import { requireApiPermission } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -35,13 +36,17 @@ function parseAmount(v: unknown): number {
   return n;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const auth = await requireApiPermission(req, "pettyCash");
+  if (auth instanceof NextResponse) return auth;
   const state = loadPettyCashState();
   const requests = loadPettyCashRequests().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return NextResponse.json({ state, requests });
 }
 
 export async function POST(req: Request) {
+  const auth = await requireApiPermission(req, "pettyCash");
+  if (auth instanceof NextResponse) return auth;
   const url = new URL(req.url);
   const action = url.searchParams.get("action");
 

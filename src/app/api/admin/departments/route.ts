@@ -2,16 +2,21 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { loadDepartments, saveDepartments } from "@/data/admin/storage";
 import type { Department } from "@/data/admin/types";
+import { requireApiPermission } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req: Request) {
+  const auth = await requireApiPermission(req, "departments");
+  if (auth instanceof NextResponse) return auth;
   const departments = loadDepartments();
   return NextResponse.json({ departments });
 }
 
 export async function POST(req: Request) {
+  const auth = await requireApiPermission(req, "departments");
+  if (auth instanceof NextResponse) return auth;
   const body = (await req.json()) as { name?: unknown };
 
   const name = typeof body.name === "string" ? body.name.trim() : "";

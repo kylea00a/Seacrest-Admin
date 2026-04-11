@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { computeClaimedOutTotalsForRange } from "@/data/admin/inventoryCompute";
 import { loadAdminSettings, loadInventorySupply, saveInventorySupply } from "@/data/admin/storage";
 import type { InventorySupplyEntry } from "@/data/admin/types";
+import { requireApiPermission } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -52,6 +53,8 @@ function sumSupplyByProductInRange(
 }
 
 export async function GET(req: Request) {
+  const auth = await requireApiPermission(req, "inventory");
+  if (auth instanceof NextResponse) return auth;
   const url = new URL(req.url);
   let start = url.searchParams.get("start");
   let end = url.searchParams.get("end");
@@ -101,6 +104,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const auth = await requireApiPermission(req, "inventory");
+  if (auth instanceof NextResponse) return auth;
   const body = (await req.json()) as {
     productName?: unknown;
     quantity?: unknown;

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { loadDepartments, loadExpenses, saveExpenses } from "@/data/admin/storage";
 import type { Expense, ExpenseFrequency, PaymentStatus } from "@/data/admin/types";
+import { requireApiPermission } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -30,12 +31,16 @@ function isPaymentStatus(v: unknown): v is PaymentStatus {
   return v === "paid" || v === "unpaid";
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const auth = await requireApiPermission(req, "expenses");
+  if (auth instanceof NextResponse) return auth;
   const expenses = loadExpenses();
   return NextResponse.json({ expenses });
 }
 
 export async function POST(req: Request) {
+  const auth = await requireApiPermission(req, "expenses");
+  if (auth instanceof NextResponse) return auth;
   const body = (await req.json()) as ExpenseCreateBody;
 
   const title = typeof body.title === "string" ? body.title.trim() : "";

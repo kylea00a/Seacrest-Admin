@@ -5,6 +5,7 @@ import { deleteOrdersStaging, readOrdersStaging, saveOrdersDay, upsertOrdersInde
 import { productNamesFromSettings } from "@/data/admin/productSettings";
 import { loadAdminSettings } from "@/data/admin/storage";
 import type { OrdersImportSummary } from "@/data/admin/types";
+import { requireApiPermission } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -12,6 +13,8 @@ export const runtime = "nodejs";
 type BulkGroup = { date: string; indices: number[] };
 
 export async function POST(req: Request) {
+  const auth = await requireApiPermission(req, "import");
+  if (auth instanceof NextResponse) return auth;
   const body = (await req.json()) as { token?: unknown };
   const token = typeof body.token === "string" ? body.token : "";
   if (!token) return NextResponse.json({ error: "Missing `token`." }, { status: 400 });

@@ -15,6 +15,7 @@ import {
   type OrderLineDetailOverride,
   type OrderStatusAdjustmentValue,
 } from "@/data/admin/storage";
+import { requireApiPermission } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -65,6 +66,8 @@ function mergeProductMaps(
 }
 
 export async function POST(req: Request) {
+  const auth = await requireApiPermission(req, "orders");
+  if (auth instanceof NextResponse) return auth;
   const body = (await req.json()) as {
     invoiceNumber?: unknown;
     lineDetails?: unknown;

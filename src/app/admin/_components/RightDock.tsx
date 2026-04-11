@@ -1,5 +1,7 @@
 "use client";
 
+import type { AdminPermissionKey } from "@/data/admin/adminPermissions";
+import type { SafeAdminAccount } from "@/lib/adminApiAuth";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -8,6 +10,10 @@ type DockLink = {
   key: string;
   label: string;
   href: string;
+  /** Required access; superadmin always passes. */
+  perm?: AdminPermissionKey;
+  /** Only superadmin sees this link (e.g. Accounts). */
+  superadminOnly?: boolean;
 };
 
 type DockSection = {
@@ -16,41 +22,65 @@ type DockSection = {
   links: DockLink[];
 };
 
-const SECTIONS: DockSection[] = [
+const ALL_SECTIONS: DockSection[] = [
   {
     key: "home",
     label: "Home",
-    links: [{ key: "home", label: "Home", href: "/admin/calendar" }],
+    links: [{ key: "home", label: "Home", href: "/admin/calendar", perm: "calendar" }],
   },
   {
     key: "finance",
     label: "Finance",
     links: [
-      { key: "expenses", label: "Expenses", href: "/admin/expenses" },
-      { key: "departments", label: "Departments", href: "/admin/departments" },
-      { key: "petty", label: "Petty Cash", href: "/admin/petty-cash" },
+      { key: "expenses", label: "Expenses", href: "/admin/expenses", perm: "expenses" },
+      { key: "departments", label: "Departments", href: "/admin/departments", perm: "departments" },
+      { key: "petty", label: "Petty Cash", href: "/admin/petty-cash", perm: "pettyCash" },
     ],
   },
   {
     key: "sales",
     label: "Sales",
     links: [
-      { key: "sales-report", label: "Sales Report", href: "/admin/sales-report" },
-      { key: "import", label: "Import Orders", href: "/admin/import" },
-      { key: "orders", label: "All Orders", href: "/admin/orders" },
-      { key: "inventory", label: "Inventory", href: "/admin/inventory" },
-      { key: "delivery", label: "Delivery", href: "/admin/delivery" },
+      { key: "sales-report", label: "Sales Report", href: "/admin/sales-report", perm: "salesReport" },
+      { key: "import", label: "Import Orders", href: "/admin/import", perm: "import" },
+      { key: "orders", label: "All Orders", href: "/admin/orders", perm: "orders" },
+      { key: "inventory", label: "Inventory", href: "/admin/inventory", perm: "inventory" },
+      { key: "delivery", label: "Delivery", href: "/admin/delivery", perm: "delivery" },
     ],
   },
   {
     key: "settings",
     label: "Settings",
     links: [
-      { key: "settings-main", label: "Categories", href: "/admin/settings" },
-      { key: "pkgprod", label: "Packages & Products", href: "/admin/packages-products" },
+      { key: "settings-main", label: "Categories", href: "/admin/settings", perm: "settings" },
+      {
+        key: "pkgprod",
+        label: "Packages & Products",
+        href: "/admin/packages-products",
+        perm: "packagesProducts",
+      },
     ],
   },
+  {
+    key: "admin",
+    label: "Administration",
+    links: [{ key: "accounts", label: "Accounts", href: "/admin/accounts", superadminOnly: true }],
+  },
 ];
+
+function filterSections(account: SafeAdminAccount): DockSection[] {
+  const visible = (item: DockLink): boolean => {
+    if (item.superadminOnly) return account.isSuperadmin;
+    if (account.isSuperadmin) return true;
+    const p = item.perm;
+    if (!p) return false;
+    return Boolean(account.permissions[p]);
+  };
+  return ALL_SECTIONS.map((sec) => ({
+    ...sec,
+    links: sec.links.filter(visible),
+  })).filter((s) => s.links.length > 0);
+}
 
 function cx(...parts: Array<string | false | undefined | null>) {
   return parts.filter(Boolean).join(" ");
@@ -84,11 +114,13 @@ function MenuIcon({ open }: { open: boolean }) {
   );
 }
 
-export default function RightDock() {
+export default function RightDock({ account }: { account: SafeAdminAccount }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
-  const allLinks = useMemo(() => SECTIONS.flatMap((s) => s.links), []);
+  const sections = useMemo(() => filterSections(account), [account]);
+
+  const allLinks = useMemo(() => sections.flatMap((s) => s.links), [sections]);
 
   const activeItem = useMemo(() => {
     const match =
@@ -119,7 +151,7 @@ export default function RightDock() {
                       />
                     </div>
                     <div className="mt-2 truncate text-xs font-semibold text-zinc-400">Seacrest Admin</div>
-                    <div className="mt-0.5 truncate text-xs text-zinc-500">Now: {activeItem.label}</div>
+                    <div className="mt-0.5 truncate text-xs text-zinc-500">Now: {activeItem?.label ?? "—"}</div>
                   </div>
                   <button
                     type="button"
@@ -131,14 +163,14 @@ export default function RightDock() {
                 </div>
 
                 <div className="mt-4 max-h-[min(70vh,520px)] space-y-4 overflow-y-auto pr-1">
-                  {SECTIONS.map((section) => (
+                  {sections.map((section) => (
                     <div key={section.key}>
                       <div className="px-1 text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">
                         {section.label}
                       </div>
                       <div className="mt-2 space-y-1">
                         {section.links.map((item) => {
-                          const active = item.key === activeItem.key;
+                          const active = item.key === activeItem?.key;
                           return (
                             <Link
                               key={item.key}
@@ -147,7 +179,7 @@ export default function RightDock() {
                                 "group flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition",
                                 active
                                   ? "bg-emerald-500/15 text-white ring-1 ring-emerald-500/35"
-                                  : "text-zinc-300 hover:bg-white/[0.05] hover:text-white"
+                                  : "text-zinc-300 hover:bg-white/[0.05] hover:text-white",
                               )}
                               onClick={() => setOpen(false)}
                             >
@@ -155,7 +187,7 @@ export default function RightDock() {
                               <span
                                 className={cx(
                                   "text-xs opacity-0 transition group-hover:opacity-100",
-                                  active ? "text-emerald-300/90 opacity-100" : "text-zinc-500"
+                                  active ? "text-emerald-300/90 opacity-100" : "text-zinc-500",
                                 )}
                               >
                                 →
@@ -179,7 +211,7 @@ export default function RightDock() {
             "flex h-14 w-14 items-center justify-center rounded-2xl border shadow-xl transition",
             open
               ? "border-emerald-500/60 bg-emerald-500/15 text-white shadow-emerald-900/40 ring-2 ring-emerald-500/25"
-              : "border-white/[0.08] bg-zinc-950/90 text-white shadow-black/50 ring-1 ring-white/[0.06] backdrop-blur-xl hover:border-emerald-500/35 hover:bg-zinc-900/95"
+              : "border-white/[0.08] bg-zinc-950/90 text-white shadow-black/50 ring-1 ring-white/[0.06] backdrop-blur-xl hover:border-emerald-500/35 hover:bg-zinc-900/95",
           )}
           aria-label={open ? "Close admin menu" : "Open admin menu"}
           aria-expanded={open}
