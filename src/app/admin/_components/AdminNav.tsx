@@ -1,5 +1,6 @@
 "use client";
 
+import logo from "@/assets/seacrest-logo.jpg";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -36,11 +37,9 @@ export default function AdminNav() {
       <div className="flex min-w-0 items-center gap-3">
         <div className="shrink-0 overflow-hidden rounded-lg bg-black ring-1 ring-zinc-200/80">
           <Image
-            src="/seacrest-logo.jpg"
+            src={logo}
             alt="SeaCrest"
-            width={256}
-            height={102}
-            className="h-8 w-auto object-contain sm:h-9"
+            className="h-8 w-auto max-w-[12rem] object-contain sm:h-9"
           />
         </div>
         <div className="min-w-0">

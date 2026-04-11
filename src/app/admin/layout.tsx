@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Image from "next/image";
+import logo from "@/assets/seacrest-logo.jpg";
 import RightDock from "./_components/RightDock";
 
 export const metadata: Metadata = {
@@ -27,12 +28,10 @@ export default function AdminLayout({
         <header className="mb-8 flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] pb-5">
           <div className="flex items-center gap-4">
             <Image
-              src="/seacrest-logo.jpg"
+              src={logo}
               alt="SeaCrest"
-              width={256}
-              height={102}
               priority
-              className="h-10 w-auto object-contain object-left md:h-11"
+              className="h-10 w-auto max-w-[min(100%,16rem)] object-contain object-left md:h-11"
             />
             <div className="hidden min-w-0 border-l border-white/[0.08] pl-4 sm:block">
               <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-400/90">

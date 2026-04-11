@@ -15,10 +15,6 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Seacrest Admin",
   description: "Seacrest company admin dashboard",
-  icons: {
-    icon: "/seacrest-logo.jpg",
-    apple: "/seacrest-logo.jpg",
-  },
 };
 
 export default function RootLayout({
