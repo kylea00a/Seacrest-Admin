@@ -1,6 +1,5 @@
 "use client";
 
-import logo from "@/assets/seacrest-logo.jpg";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -113,8 +112,10 @@ export default function RightDock() {
                     </div>
                     <div className="mt-2 overflow-hidden rounded-lg bg-black ring-1 ring-white/[0.08]">
                       <Image
-                        src={logo}
+                        src="/seacrest-logo.jpg"
                         alt="SeaCrest"
+                        width={200}
+                        height={80}
                         className="h-8 w-auto max-w-[11rem] object-contain object-left"
                       />
                     </div>
