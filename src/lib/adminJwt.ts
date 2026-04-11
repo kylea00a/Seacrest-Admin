@@ -33,4 +33,14 @@ export async function verifyAdminSessionToken(token: string): Promise<{ sub: str
   }
 }
 
+/**
+ * Browsers ignore `Secure` cookies on plain HTTP. In production behind HTTP only (no TLS),
+ * set `ADMIN_SESSION_INSECURE_HTTP=1` so login can set the session cookie.
+ */
+export function adminSessionCookieSecure(): boolean {
+  if (process.env.NODE_ENV !== "production") return false;
+  if (process.env.ADMIN_SESSION_INSECURE_HTTP === "1") return false;
+  return true;
+}
+
 export { COOKIE as ADMIN_SESSION_COOKIE_NAME };

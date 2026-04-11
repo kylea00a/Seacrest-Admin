@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { accountCount, createAccount } from "@/data/admin/accountsStore";
-import { ADMIN_SESSION_COOKIE_NAME, signAdminSession } from "@/lib/adminJwt";
+import {
+  ADMIN_SESSION_COOKIE_NAME,
+  adminSessionCookieSecure,
+  signAdminSession,
+} from "@/lib/adminJwt";
 import { toSafeAccount } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
@@ -39,7 +43,7 @@ export async function POST(request: Request) {
       path: "/",
       maxAge: 12 * 60 * 60,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: adminSessionCookieSecure(),
     });
     return res;
   } catch (e) {

@@ -7,9 +7,6 @@ import { useEffect, useState } from "react";
 export default function AdminSetupPage() {
   const router = useRouter();
   const { refresh, needsSetup, account } = useAdminSession();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("Superadmin");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -18,23 +15,56 @@ export default function AdminSetupPage() {
     if (!needsSetup && !account) router.replace("/admin/login");
   }, [needsSetup, account, router]);
 
-  async function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setErr(null);
+    const form = e.currentTarget;
+    const dnEl = form.elements.namedItem("displayName");
+    const emailEl = form.elements.namedItem("email");
+    const passEl = form.elements.namedItem("password");
+    const displayNameVal =
+      dnEl instanceof HTMLInputElement ? dnEl.value.trim() || "Superadmin" : "Superadmin";
+    const emailVal = emailEl instanceof HTMLInputElement ? emailEl.value.trim() : "";
+    const passwordVal = passEl instanceof HTMLInputElement ? passEl.value : "";
+    if (!emailVal || passwordVal.length < 8) {
+      setErr("Enter a valid email and a password of at least 8 characters.");
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch("/api/admin/auth/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, displayName }),
+        body: JSON.stringify({
+          email: emailVal,
+          password: passwordVal,
+          displayName: displayNameVal,
+        }),
       });
-      const data = (await res.json()) as { error?: string };
+      const raw = await res.text();
+      let data: { error?: string } = {};
+      if (raw) {
+        try {
+          data = JSON.parse(raw) as { error?: string };
+        } catch {
+          setErr(res.ok ? "Unexpected server response." : `Setup failed (${res.status}).`);
+          return;
+        }
+      }
       if (!res.ok) {
-        setErr(data.error ?? "Setup failed.");
+        setErr(data.error ?? `Setup failed (${res.status}).`);
         return;
       }
-      await refresh();
+      const snapshot = await refresh();
+      if (!snapshot.account) {
+        setErr(
+          "Account created, but the browser did not keep your session. If you use HTTP (not HTTPS), set ADMIN_SESSION_INSECURE_HTTP=1 on the server and restart, or use HTTPS.",
+        );
+        return;
+      }
       router.replace("/admin/calendar");
+    } catch (err) {
+      setErr(err instanceof Error ? err.message : "Could not reach the server.");
     } finally {
       setBusy(false);
     }
@@ -55,36 +85,37 @@ export default function AdminSetupPage() {
         <p className="mt-1 text-center text-xs text-zinc-500">
           Create the superadmin account. Data is stored under <code className="text-zinc-400">data/admin/</code>.
         </p>
-        <form onSubmit={(e) => void onSubmit(e)} className="mt-6 space-y-4">
+        <form
+          noValidate
+          onSubmit={(e) => void onSubmit(e)}
+          className="mt-6 space-y-4"
+        >
           <label className="block text-xs font-medium text-zinc-400">
             Display name
             <input
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
+              name="displayName"
+              defaultValue="Superadmin"
               className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500/50"
             />
           </label>
           <label className="block text-xs font-medium text-zinc-400">
             Email
             <input
+              name="email"
               type="email"
               autoComplete="username"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              defaultValue=""
               className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500/50"
-              required
             />
           </label>
           <label className="block text-xs font-medium text-zinc-400">
             Password (min 8 characters)
             <input
+              name="password"
               type="password"
               autoComplete="new-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              defaultValue=""
               className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500/50"
-              minLength={8}
-              required
             />
           </label>
           {err ? <p className="text-xs text-red-400">{err}</p> : null}

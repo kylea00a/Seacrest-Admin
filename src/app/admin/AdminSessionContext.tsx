@@ -14,11 +14,16 @@ import {
 
 export type { SafeAdminAccount };
 
+export type AdminSessionSnapshot = {
+  needsSetup: boolean;
+  account: SafeAdminAccount | null;
+};
+
 type Ctx = {
   loading: boolean;
   needsSetup: boolean;
   account: SafeAdminAccount | null;
-  refresh: () => Promise<void>;
+  refresh: () => Promise<AdminSessionSnapshot>;
   can: (key: AdminPermissionKey) => boolean;
 };
 
@@ -29,19 +34,29 @@ export function AdminSessionProvider({ children }: { children: ReactNode }) {
   const [needsSetup, setNeedsSetup] = useState(false);
   const [account, setAccount] = useState<SafeAdminAccount | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<AdminSessionSnapshot> => {
     const res = await fetch("/api/admin/auth/session", { cache: "no-store" });
-    const data = (await res.json()) as {
-      needsSetup?: boolean;
-      account?: SafeAdminAccount | null;
-    };
-    if (res.status === 401) {
-      setNeedsSetup(Boolean(data.needsSetup));
+    let data: { needsSetup?: boolean; account?: SafeAdminAccount | null };
+    try {
+      data = (await res.json()) as {
+        needsSetup?: boolean;
+        account?: SafeAdminAccount | null;
+      };
+    } catch {
+      setNeedsSetup(false);
       setAccount(null);
-      return;
+      return { needsSetup: false, account: null };
     }
-    setNeedsSetup(Boolean(data.needsSetup));
-    setAccount(data.account ?? null);
+    const needsSetup = Boolean(data.needsSetup);
+    const account = data.account ?? null;
+    if (res.status === 401) {
+      setNeedsSetup(needsSetup);
+      setAccount(null);
+      return { needsSetup, account: null };
+    }
+    setNeedsSetup(needsSetup);
+    setAccount(account);
+    return { needsSetup, account };
   }, []);
 
   useEffect(() => {
