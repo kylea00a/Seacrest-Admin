@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import AdminNav from "./_components/AdminNav";
 import RightDock from "./_components/RightDock";
 
 export const metadata: Metadata = {
@@ -45,7 +44,6 @@ export default function AdminLayout({
             Open the <span className="text-zinc-400">menu</span> on the right to switch sections.
           </p>
         </header>
-        <AdminNav />
         <div className="animate-fade-in">{children}</div>
       </div>
       <RightDock />
