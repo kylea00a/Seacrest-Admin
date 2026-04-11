@@ -1,22 +1,35 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+This is a [Next.js](https://nextjs.org) app that fetches a CSV (including a Google Sheet published as CSV) and displays the raw rows in a basic dashboard.
 
 ## Getting Started
 
-First, run the development server:
+### 1) Configure your CSV URL
+
+Copy the example env file, then set `SHEET_CSV_URL`:
+
+```bash
+cp .env.local.example .env.local
+```
+
+To get a Google Sheet CSV URL:
+
+- In Google Sheets: **File → Share → Publish to web**
+- Choose the desired **sheet/tab** and select **Comma-separated values (.csv)**
+- Copy the generated link and paste it as `SHEET_CSV_URL`
+
+### 2) Run the dev server
+
+Run the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000` and click **Open dashboard** (or go to `/dashboard`).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Notes
+
+- The dashboard calls `GET /api/data`, which fetches `SHEET_CSV_URL` and parses it as CSV.
+- Your `SHEET_CSV_URL` must be accessible from your machine/server (public or otherwise reachable in the environment you run this app).
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 

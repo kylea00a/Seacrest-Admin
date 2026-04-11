@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #09090b;
+  --foreground: #fafafa;
 }
 
 @theme inline {
@@ -12,15 +12,105 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-in {
+  animation: fade-in 0.5s ease-out forwards;
+}
+
+/* react-day-picker — shared compact popover (All Orders range + Inventory single day) */
+.admin-date-popover .rdp-root {
+  --rdp-accent-color: #2563eb;
+  --rdp-accent-background-color: #dbeafe;
+  --rdp-day_button-border-radius: 4px;
+  color: #18181b;
+}
+
+@layer components {
+  /* Seacrest admin — shared surfaces */
+  .admin-card {
+    @apply rounded-2xl border border-white/[0.08] bg-zinc-900/45 p-4 shadow-[0_24px_80px_-24px_rgba(0,0,0,0.65)] backdrop-blur-xl ring-1 ring-white/[0.04] sm:p-6;
+  }
+  .admin-card-inset {
+    @apply rounded-xl border border-white/[0.06] bg-zinc-950/55 p-3 ring-1 ring-white/[0.03];
+  }
+  .admin-table-wrap {
+    @apply mt-4 overflow-auto rounded-2xl border border-white/[0.08] bg-zinc-950/40 ring-1 ring-white/[0.04];
+  }
+  /* All Orders: freeze first 3 columns (Date, Distributor ID, Distributor) on horizontal scroll */
+  .orders-pinned-table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  .orders-pinned-table thead .orders-pin-1,
+  .orders-pinned-table thead .orders-pin-2,
+  .orders-pinned-table thead .orders-pin-3 {
+    @apply bg-zinc-900/95 backdrop-blur-sm;
+  }
+  .orders-pinned-table tbody .orders-pin-1,
+  .orders-pinned-table tbody .orders-pin-2,
+  .orders-pinned-table tbody .orders-pin-3 {
+    @apply bg-zinc-950/95 backdrop-blur-sm;
+  }
+  .orders-pinned-table .orders-pin-1 {
+    position: sticky;
+    left: 0;
+    z-index: 25;
+    width: 6rem;
+    min-width: 6rem;
+    max-width: 6rem;
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .orders-pinned-table .orders-pin-2 {
+    position: sticky;
+    left: 6rem;
+    z-index: 26;
+    width: 7rem;
+    min-width: 7rem;
+    max-width: 7rem;
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .orders-pinned-table .orders-pin-3 {
+    position: sticky;
+    left: 13rem;
+    z-index: 27;
+    width: 13rem;
+    min-width: 13rem;
+    max-width: 13rem;
+    box-shadow: 4px 0 14px -4px rgba(0, 0, 0, 0.55);
+  }
+  .admin-title {
+    @apply text-xl font-semibold tracking-tight text-white sm:text-2xl;
+  }
+  .admin-muted {
+    @apply text-sm leading-relaxed text-zinc-400;
+  }
+  .admin-input {
+    @apply rounded-xl border border-white/[0.1] bg-zinc-950/80 px-3 py-2 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/15;
+  }
+  .admin-select {
+    @apply rounded-xl border border-white/[0.1] bg-zinc-950/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/15;
+  }
+  .admin-btn-primary {
+    @apply inline-flex items-center justify-center rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-emerald-950 shadow-lg shadow-emerald-900/30 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .admin-btn-secondary {
+    @apply inline-flex items-center justify-center rounded-xl border border-white/[0.1] bg-white/[0.04] px-3 py-2 text-sm font-semibold text-zinc-200 transition hover:bg-white/[0.08];
+  }
+  .admin-alert-error {
+    @apply rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200;
+  }
 }

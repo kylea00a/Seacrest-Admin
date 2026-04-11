@@ -6,21 +6,35 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "deploy": "vercel --prod",
+    "backup:supabase": "node scripts/backup-admin-data-to-supabase.mjs"
   },
   "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.5.0",
+    "@react-three/postprocessing": "^3.0.4",
+    "@supabase/supabase-js": "^2.103.0",
+    "date-fns": "^4.1.0",
+    "exceljs": "^4.4.0",
     "next": "16.1.6",
+    "papaparse": "^5.5.3",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-day-picker": "^9.14.0",
+    "react-dom": "19.2.3",
+    "three": "^0.182.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/papaparse": "^5.5.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vercel": "^50.15.1"
   }
 }
