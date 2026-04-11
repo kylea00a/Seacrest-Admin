@@ -1,0 +1,23 @@
+---
+description: Keep local dev and GitHub main in sync for Seacrest-Admin
+alwaysApply: true
+---
+
+# Git + local dev workflow
+
+## How “live local” works
+
+- **Next.js dev server** (`npm run dev`) reloads when you **save files**. That does not use Git. Your machine already has the latest code while you edit.
+- **GitHub** is a backup and deploy trigger. Pushing does **not** “update local” after your own edits—your editor already has those changes. Use `git pull` only when something changed on GitHub from **another** computer or teammate.
+
+## After making code changes (agent + human)
+
+1. Run **`npm run dev`** in the project root while working so localhost stays live.
+2. When a feature or fix is done, **commit** then **publish** to GitHub:
+   - `git add -A && git commit -m "…"` (or stage/commit in Cursor)
+   - `npm run git:sync` — pulls latest `main`, rebases if needed, then **pushes** (keeps local and origin aligned).
+   - If you only need to push and you know you’re up to date: `npm run git:push`.
+
+## When the user wants GitHub and local “together”
+
+- Prefer running **`npm run git:sync`** after commits so `main` on GitHub matches the local branch and any remote commits are integrated before push.

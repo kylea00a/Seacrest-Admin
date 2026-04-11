@@ -9,7 +9,9 @@
     "lint": "eslint",
     "deploy": "vercel --prod",
     "backup:supabase": "node scripts/sync-to-supabase-shelf.mjs",
-    "shelf:sync": "node scripts/sync-to-supabase-shelf.mjs"
+    "shelf:sync": "node scripts/sync-to-supabase-shelf.mjs",
+    "git:push": "git push origin main",
+    "git:sync": "git pull --rebase origin main && git push origin main"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
