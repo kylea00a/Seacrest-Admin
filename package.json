@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "deploy": "vercel --prod",
-    "backup:supabase": "node scripts/backup-admin-data-to-supabase.mjs"
+    "backup:supabase": "node scripts/sync-to-supabase-shelf.mjs",
+    "shelf:sync": "node scripts/sync-to-supabase-shelf.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

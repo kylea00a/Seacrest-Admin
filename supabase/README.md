@@ -10,7 +10,15 @@
 After that, from the project root:
 
 ```bash
-npm run backup:supabase
+npm run shelf:sync
+```
+
+(Older alias: `npm run backup:supabase` — same script.)
+
+Dry run (list files only, no upload):
+
+```bash
+npm run shelf:sync -- --dry-run
 ```
 
 This uploads JSON from `data/admin/` into `public.admin_storage_backup` (one row per file).
