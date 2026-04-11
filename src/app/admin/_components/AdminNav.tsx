@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -35,11 +34,11 @@ export default function AdminNav() {
     <div className="flex items-center justify-between gap-4 border-b border-zinc-200 bg-white/60 px-4 py-3 backdrop-blur">
       <div className="flex min-w-0 items-center gap-3">
         <div className="shrink-0 overflow-hidden rounded-lg bg-black ring-1 ring-zinc-200/80">
-          <Image
+          <img
             src="/seacrest-logo.jpg"
             alt="SeaCrest"
-            width={256}
-            height={102}
+            width={1024}
+            height={409}
             className="h-8 w-auto max-w-[12rem] object-contain sm:h-9"
           />
         </div>

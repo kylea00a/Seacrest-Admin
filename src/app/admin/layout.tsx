@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Image from "next/image";
+import AdminNav from "./_components/AdminNav";
 import RightDock from "./_components/RightDock";
 
 export const metadata: Metadata = {
@@ -26,12 +26,12 @@ export default function AdminLayout({
       <div className="relative z-10 mx-auto w-full max-w-[1400px] px-4 pb-12 pt-8 sm:px-6 lg:px-8">
         <header className="mb-8 flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] pb-5">
           <div className="flex items-center gap-4">
-            <Image
+            <img
               src="/seacrest-logo.jpg"
               alt="SeaCrest"
-              width={256}
-              height={102}
-              priority
+              width={1024}
+              height={409}
+              fetchPriority="high"
               className="h-10 w-auto max-w-[min(100%,16rem)] object-contain object-left md:h-11"
             />
             <div className="hidden min-w-0 border-l border-white/[0.08] pl-4 sm:block">
@@ -45,6 +45,7 @@ export default function AdminLayout({
             Open the <span className="text-zinc-400">menu</span> on the right to switch sections.
           </p>
         </header>
+        <AdminNav />
         <div className="animate-fade-in">{children}</div>
       </div>
       <RightDock />

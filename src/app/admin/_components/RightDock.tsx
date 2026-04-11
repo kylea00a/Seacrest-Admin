@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -111,11 +110,11 @@ export default function RightDock() {
                       Navigation
                     </div>
                     <div className="mt-2 overflow-hidden rounded-lg bg-black ring-1 ring-white/[0.08]">
-                      <Image
+                      <img
                         src="/seacrest-logo.jpg"
                         alt="SeaCrest"
-                        width={200}
-                        height={80}
+                        width={1024}
+                        height={409}
                         className="h-8 w-auto max-w-[11rem] object-contain object-left"
                       />
                     </div>
