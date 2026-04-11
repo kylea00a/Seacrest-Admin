@@ -159,11 +159,13 @@ export async function POST(req: Request) {
   const proposedDm = String(proposed["deliveryMethod"] ?? "");
   const sourceDay = String(found.sourceDate ?? "").slice(0, 10);
 
-  const superBypass =
-    auth.isSuperadmin && req.headers.get("x-superadmin-line-edit") === "1";
+  /** Full-edit users may bypass claim / same-day locks via the "New Edit" column (header set by client). */
+  const bypassClaimDayLocks =
+    req.headers.get("x-orders-line-bypass") === "1" ||
+    req.headers.get("x-superadmin-line-edit") === "1";
 
   // Delivery (incl. paid → UI "Claimed"): editable until end of order calendar day in PH; not blocked by mode === "claimed".
-  if (!superBypass) {
+  if (!bypassClaimDayLocks) {
     if (isNonPickupDelivery(proposedDm)) {
       if (!isSameLocalCalendarDay(sourceDay)) {
         return NextResponse.json(
