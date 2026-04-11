@@ -14,6 +14,7 @@ import {
   isSameLocalCalendarDay,
 } from "@/data/admin/orderClaim";
 import type { OrderClaimRecord } from "@/data/admin/types";
+import { useAdminSession } from "../AdminSessionContext";
 
 type ParsedRow = {
   rowIndex: number;
@@ -307,6 +308,8 @@ function OrderLineEditForm({
 }
 
 export default function OrdersPage() {
+  const { can } = useAdminSession();
+  const canFullOrderEdit = can("ordersFullEdit");
   const productKeys = useAdminProductKeys();
   const [index, setIndex] = useState<OrdersImportSummary[]>([]);
   const [rows, setRows] = useState<Array<ParsedRow & { date: string }>>([]);
@@ -882,12 +885,14 @@ export default function OrdersPage() {
               const statusComplete = (r.status ?? "").toLowerCase().includes("complete");
               const dm = r.deliveryMethod ?? "";
               const sameOrderDay = isSameLocalCalendarDay(r.date);
-              /** Pick-up: hide edit once Claimed. Delivery: hide only after the order calendar day (PH); paid delivery stays "Claimed" in UI but remains editable until end of that day. */
+              /** Pick-up: hide edit once Claimed. Delivery: hide only after the order calendar day (PH); paid delivery stays "Claimed" in UI but remains editable until end of that day. `ordersFullEdit` gates detail editing. */
               const hideLineEditToggle =
+                !canFullOrderEdit ||
                 claimMode === "na" ||
                 (isPickupDelivery(dm) && claimMode === "claimed") ||
                 (isNonPickupDelivery(dm) && !sameOrderDay);
               const allowLineEdit =
+                canFullOrderEdit &&
                 !statusComplete &&
                 claimMode !== "na" &&
                 ((isNonPickupDelivery(dm) && sameOrderDay) ||
@@ -964,7 +969,7 @@ export default function OrdersPage() {
                     <td className="px-3 py-2 whitespace-nowrap">
                       {(() => {
                         const locked = isTerminalOrderStatus(r.status);
-                        if (locked) return <span>{r.status}</span>;
+                        if (locked || !canFullOrderEdit) return <span>{r.status}</span>;
                         return (
                           <div className="flex items-center gap-2">
                             <select
@@ -1027,11 +1032,13 @@ export default function OrdersPage() {
                         <span
                           className="text-zinc-600"
                           title={
-                            isPickupDelivery(dm) && claimMode === "claimed"
-                              ? "Claimed pick-up orders cannot be line-edited."
-                              : isNonPickupDelivery(dm) && !sameOrderDay
-                                ? "After the order day (PH time), delivery line edits are locked — even if it showed Claimed when it was still the same day."
-                                : undefined
+                            !canFullOrderEdit
+                              ? "Enable “Edit all order details” on your account to change products, delivery, fees, and status."
+                              : isPickupDelivery(dm) && claimMode === "claimed"
+                                ? "Claimed pick-up orders cannot be line-edited."
+                                : isNonPickupDelivery(dm) && !sameOrderDay
+                                  ? "After the order day (PH time), delivery line edits are locked — even if it showed Claimed when it was still the same day."
+                                  : undefined
                           }
                         >
                           —

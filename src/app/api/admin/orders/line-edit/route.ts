@@ -66,7 +66,7 @@ function mergeProductMaps(
 }
 
 export async function POST(req: Request) {
-  const auth = await requireApiPermission(req, "orders");
+  const auth = await requireApiPermission(req, "ordersFullEdit");
   if (auth instanceof NextResponse) return auth;
   const body = (await req.json()) as {
     invoiceNumber?: unknown;

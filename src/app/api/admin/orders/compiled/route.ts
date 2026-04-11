@@ -4,7 +4,7 @@ import { mergeOrderRowWithAdjustment } from "@/data/admin/orderAdjustmentMerge";
 import { resolvePackageNameFromPrice } from "@/data/admin/packageResolve";
 import { readOrdersDayAsync } from "@/data/admin/orders";
 import { loadAdminSettings, loadOrderAdjustments, loadOrderClaims, loadOrdersIndex } from "@/data/admin/storage";
-import { requireApiPermission } from "@/lib/adminApiAuth";
+import { requireApiAnyPermission } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -39,7 +39,7 @@ function priceFromPackageCode(packageName: string): number {
 }
 
 export async function GET(req: Request) {
-  const auth = await requireApiPermission(req, "orders");
+  const auth = await requireApiAnyPermission(req, ["orders", "ordersFullEdit"]);
   if (auth instanceof NextResponse) return auth;
   const url = new URL(req.url);
   const startRaw = url.searchParams.get("start");

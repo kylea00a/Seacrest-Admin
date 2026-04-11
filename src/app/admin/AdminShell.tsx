@@ -52,6 +52,12 @@ export default function AdminShell({ children }: { children: ReactNode }) {
       router.replace("/admin/forbidden");
       return;
     }
+    if (key === "orders") {
+      if (!account.permissions.orders && !account.permissions.ordersFullEdit) {
+        router.replace("/admin/forbidden");
+      }
+      return;
+    }
     if (key && !account.permissions[key]) {
       router.replace("/admin/forbidden");
     }

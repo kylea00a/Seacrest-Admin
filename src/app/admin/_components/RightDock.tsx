@@ -74,6 +74,9 @@ function filterSections(account: SafeAdminAccount): DockSection[] {
     if (account.isSuperadmin) return true;
     const p = item.perm;
     if (!p) return false;
+    if (p === "orders") {
+      return Boolean(account.permissions.orders || account.permissions.ordersFullEdit);
+    }
     return Boolean(account.permissions[p]);
   };
   return ALL_SECTIONS.map((sec) => ({
