@@ -47,7 +47,7 @@ function writeFile(data: AccountsFile) {
 }
 
 export function listAccounts(): AdminAccountRecord[] {
-  return readFile().accounts;
+  return readFile().accounts.map((a) => ({ ...a, permissions: normalizePermissions(a.permissions) }));
 }
 
 export function accountCount(): number {
@@ -56,7 +56,8 @@ export function accountCount(): number {
 
 export function loadAccountById(id: string): AdminAccountRecord | null {
   const a = readFile().accounts.find((x) => x.id === id);
-  return a ?? null;
+  if (!a) return null;
+  return { ...a, permissions: normalizePermissions(a.permissions) };
 }
 
 export function loadAccountByEmail(email: string): AdminAccountRecord | null {
@@ -65,7 +66,8 @@ export function loadAccountByEmail(email: string): AdminAccountRecord | null {
   return a ?? null;
 }
 
-function normalizePermissions(
+/** Ensures every permission key exists (handles older `accounts.json` without newer keys). */
+export function normalizePermissions(
   input: Partial<Record<AdminPermissionKey, boolean>> | undefined,
 ): Record<AdminPermissionKey, boolean> {
   const base = defaultPermissionsAllFalse();
@@ -92,13 +94,21 @@ export async function createAccount(args: {
     throw new Error("An account with this email already exists.");
   }
   const now = new Date().toISOString();
+  let permissions = defaultPermissionsAllFalse();
+  if (!args.isSuperadmin) {
+    const basePerms = normalizePermissions(args.permissions);
+    permissions = normalizePermissions({
+      ...basePerms,
+      ...(basePerms.ordersFullEdit ? { orders: true } : {}),
+    });
+  }
   const rec: AdminAccountRecord = {
     id: crypto.randomUUID(),
     email,
     passwordHash: await bcrypt.hash(args.password, 10),
     displayName: args.displayName.trim() || (email.split("@")[0] ?? "User"),
     isSuperadmin: Boolean(args.isSuperadmin),
-    permissions: args.isSuperadmin ? defaultPermissionsAllFalse() : normalizePermissions(args.permissions),
+    permissions,
     createdAt: now,
     updatedAt: now,
   };
@@ -132,7 +142,9 @@ export function updateAccount(
     if (patch.isSuperadmin) next.permissions = defaultPermissionsAllFalse();
   }
   if (patch.permissions && typeof patch.permissions === "object" && !next.isSuperadmin) {
-    next.permissions = normalizePermissions({ ...next.permissions, ...patch.permissions });
+    const merged = { ...next.permissions, ...patch.permissions };
+    if (merged.ordersFullEdit) merged.orders = true;
+    next.permissions = normalizePermissions(merged);
   }
   if (typeof patch.password === "string" && patch.password.length >= 8) {
     next = { ...next, passwordHash: bcrypt.hashSync(patch.password, 10) };

@@ -8,7 +8,66 @@ import {
 } from "@/data/admin/adminPermissions";
 import { useAdminSession } from "../AdminSessionContext";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+
+/** Permissions other than the Orders pair (shown in their own subsection). */
+const NON_ORDERS_PERMISSION_KEYS = ADMIN_PERMISSION_KEYS.filter(
+  (k) => k !== "orders" && k !== "ordersFullEdit",
+);
+
+function patchOrdersPermissions(
+  prev: Record<AdminPermissionKey, boolean>,
+  key: "orders" | "ordersFullEdit",
+  value: boolean,
+): Record<AdminPermissionKey, boolean> {
+  const next = { ...prev, [key]: value };
+  if (key === "ordersFullEdit" && value) next.orders = true;
+  if (key === "orders" && !value) next.ordersFullEdit = false;
+  return next;
+}
+
+function OrdersPermissionBlock({
+  perm,
+  setPerm,
+}: {
+  perm: Record<AdminPermissionKey, boolean>;
+  setPerm: Dispatch<SetStateAction<Record<AdminPermissionKey, boolean>>>;
+}) {
+  return (
+    <div className="sm:col-span-2 rounded-xl border border-white/[0.08] bg-black/25 p-3">
+      <div className="text-xs font-semibold text-zinc-300">Orders</div>
+      <p className="mt-1 text-[10px] leading-snug text-zinc-500">
+        <span className="font-medium text-zinc-400">Edit Superadmin</span> unlocks changing status, line items,
+        delivery, fees, and address on <strong className="text-zinc-400">All orders</strong>. View &amp; claim alone
+        keeps those fields read-only (you can still claim pick-ups).
+      </p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <label className="flex items-start gap-2 text-xs text-zinc-400">
+          <input
+            type="checkbox"
+            checked={perm.orders}
+            onChange={(e) =>
+              setPerm((p) => patchOrdersPermissions(p, "orders", e.target.checked))
+            }
+            className="mt-0.5 rounded border-white/20"
+          />
+          <span>{ADMIN_PERMISSION_LABELS.orders}</span>
+        </label>
+        <label className="flex items-start gap-2 text-xs text-zinc-400">
+          <input
+            type="checkbox"
+            checked={perm.ordersFullEdit}
+            onChange={(e) =>
+              setPerm((p) => patchOrdersPermissions(p, "ordersFullEdit", e.target.checked))
+            }
+            className="mt-0.5 rounded border-white/20"
+          />
+          <span>{ADMIN_PERMISSION_LABELS.ordersFullEdit}</span>
+        </label>
+      </div>
+    </div>
+  );
+}
 
 type Row = {
   id: string;
@@ -174,7 +233,8 @@ function CreateAccountForm({ onCreated }: { onCreated: () => Promise<void> }) {
       </label>
       {!isSuperadmin ? (
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          {ADMIN_PERMISSION_KEYS.map((key) => (
+          <OrdersPermissionBlock perm={perm} setPerm={setPerm} />
+          {NON_ORDERS_PERMISSION_KEYS.map((key) => (
             <label key={key} className="flex items-center gap-2 text-xs text-zinc-400">
               <input
                 type="checkbox"
@@ -307,7 +367,8 @@ function AccountEditor({
         </label>
         {!isSuperadmin ? (
           <div className="grid gap-2 sm:grid-cols-2">
-            {ADMIN_PERMISSION_KEYS.map((key) => (
+            <OrdersPermissionBlock perm={perm} setPerm={setPerm} />
+            {NON_ORDERS_PERMISSION_KEYS.map((key) => (
               <label key={key} className="flex items-center gap-2 text-xs text-zinc-400">
                 <input
                   type="checkbox"

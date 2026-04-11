@@ -159,22 +159,27 @@ export async function POST(req: Request) {
   const proposedDm = String(proposed["deliveryMethod"] ?? "");
   const sourceDay = String(found.sourceDate ?? "").slice(0, 10);
 
+  const superBypass =
+    auth.isSuperadmin && req.headers.get("x-superadmin-line-edit") === "1";
+
   // Delivery (incl. paid → UI "Claimed"): editable until end of order calendar day in PH; not blocked by mode === "claimed".
-  if (isNonPickupDelivery(proposedDm)) {
-    if (!isSameLocalCalendarDay(sourceDay)) {
+  if (!superBypass) {
+    if (isNonPickupDelivery(proposedDm)) {
+      if (!isSameLocalCalendarDay(sourceDay)) {
+        return NextResponse.json(
+          {
+            error:
+              "Delivery line items can only be edited on the order's calendar day (Asia/Manila). The next day they are locked.",
+          },
+          { status: 400 },
+        );
+      }
+    } else if (isPickupDelivery(proposedDm) && mode === "claimed") {
       return NextResponse.json(
-        {
-          error:
-            "Delivery line items can only be edited on the order's calendar day (Asia/Manila). The next day they are locked.",
-        },
+        { error: "Claimed pick-up orders cannot be edited." },
         { status: 400 },
       );
     }
-  } else if (isPickupDelivery(proposedDm) && mode === "claimed") {
-    return NextResponse.json(
-      { error: "Claimed pick-up orders cannot be edited." },
-      { status: 400 },
-    );
   }
 
   const next: OrderAdjustment = {

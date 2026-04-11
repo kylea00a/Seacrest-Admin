@@ -4,6 +4,7 @@ import type { AdminPermissionKey } from "@/data/admin/adminPermissions";
 import {
   accountHasPermission,
   loadAccountById,
+  normalizePermissions,
   type AdminAccountRecord,
 } from "@/data/admin/accountsStore";
 import { ADMIN_SESSION_COOKIE_NAME, verifyAdminSessionToken } from "./adminJwt";
@@ -12,7 +13,7 @@ export type SafeAdminAccount = Omit<AdminAccountRecord, "passwordHash">;
 
 export function toSafeAccount(a: AdminAccountRecord): SafeAdminAccount {
   const { passwordHash: _, ...rest } = a;
-  return rest;
+  return { ...rest, permissions: normalizePermissions(rest.permissions) };
 }
 
 async function getTokenFromRequest(request: Request): Promise<string | null> {

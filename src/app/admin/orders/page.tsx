@@ -147,6 +147,7 @@ function OrderLineEditForm({
   onSave,
   onCancel,
   saving,
+  superMode,
 }: {
   productKeys: string[];
   draft: LineEditDraft;
@@ -154,6 +155,8 @@ function OrderLineEditForm({
   onSave: () => void;
   onCancel: () => void;
   saving: boolean;
+  /** Superadmin red-column edit: saves bypass claim / same-day locks. */
+  superMode?: boolean;
 }) {
   const inp =
     "mt-0.5 w-full rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500/50";
@@ -188,6 +191,12 @@ function OrderLineEditForm({
 
   return (
     <div className="space-y-4">
+      {superMode ? (
+        <p className="rounded-lg border border-red-500/40 bg-red-950/40 px-3 py-2 text-xs text-red-100">
+          <strong>Superadmin edit</strong> — saving will override the usual claim and same-day locks (server
+          verified).
+        </p>
+      ) : null}
       <div className="grid gap-4 lg:grid-cols-3">
         {sec("Package products", productGrid("packageProducts"))}
         {sec("Subscription products", productGrid("subscriptionProducts"))}
@@ -308,8 +317,9 @@ function OrderLineEditForm({
 }
 
 export default function OrdersPage() {
-  const { can } = useAdminSession();
+  const { can, account } = useAdminSession();
   const canFullOrderEdit = can("ordersFullEdit");
+  const isSuperadmin = Boolean(account?.isSuperadmin);
   const productKeys = useAdminProductKeys();
   const [index, setIndex] = useState<OrdersImportSummary[]>([]);
   const [rows, setRows] = useState<Array<ParsedRow & { date: string }>>([]);
@@ -330,6 +340,8 @@ export default function OrdersPage() {
   const [claims, setClaims] = useState<Record<string, OrderClaimRecord>>({});
   const [savingClaim, setSavingClaim] = useState<string>("");
   const [lineEditOpen, setLineEditOpen] = useState<Record<string, boolean>>({});
+  /** Superadmin-only: bypasses claim / same-day locks when saving (see red Edit column). */
+  const [lineEditSuperOpen, setLineEditSuperOpen] = useState<Record<string, boolean>>({});
   const [lineEditDrafts, setLineEditDrafts] = useState<Record<string, LineEditDraft>>({});
   const [savingLineEdit, setSavingLineEdit] = useState<string>("");
 
@@ -461,12 +473,13 @@ export default function OrdersPage() {
     const subCols = subProductsOpen ? productKeys.length : 0;
     const repCols = repProductsOpen ? productKeys.length : 0;
     const shipCols = shippingDetailsOpen ? 8 : 1;
-    return 7 + pkgCols + 1 + subCols + 1 + repCols + 5 + shipCols + 3;
+    return 7 + pkgCols + 1 + subCols + 1 + repCols + 5 + shipCols + 4;
   }, [pkgProductsOpen, subProductsOpen, repProductsOpen, shippingDetailsOpen, productKeys.length]);
 
   const saveLineEdit = async (invoiceNumber: string) => {
     const draft = lineEditDrafts[invoiceNumber];
     if (!draft) return;
+    const superBypass = Boolean(lineEditSuperOpen[invoiceNumber]);
     setSavingLineEdit(invoiceNumber);
     setError(null);
     try {
@@ -502,12 +515,16 @@ export default function OrdersPage() {
       }
       const res = await fetch("/api/admin/orders/line-edit", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(superBypass ? { "x-superadmin-line-edit": "1" } : {}),
+        },
         body: JSON.stringify({ invoiceNumber, lineDetails }),
       });
       const json = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
       setLineEditOpen((prev) => ({ ...prev, [invoiceNumber]: false }));
+      setLineEditSuperOpen((prev) => ({ ...prev, [invoiceNumber]: false }));
       setLineEditDrafts((prev) => {
         const next = { ...prev };
         delete next[invoiceNumber];
@@ -846,6 +863,9 @@ export default function OrdersPage() {
               <th className="px-3 py-2 text-center" rowSpan={headRowSpan}>
                 Edit
               </th>
+              <th className="px-3 py-2 text-center" rowSpan={headRowSpan}>
+                Edit Superadmin
+              </th>
             </tr>
             {hasOpenSection ? (
               <tr className="text-[10px] text-zinc-400">
@@ -900,7 +920,14 @@ export default function OrdersPage() {
                     claimMode !== "claimed" &&
                     (claimMode === "claim" || claimMode === "unpaid")));
               const editOn = lineEditOpen[inv] ?? false;
+              const editSuperOn = lineEditSuperOpen[inv] ?? false;
               const draft = lineEditDrafts[inv];
+              const cancelled = (r.status ?? "").toLowerCase().includes("cancel");
+              const allowSuperLineEdit =
+                isSuperadmin &&
+                canFullOrderEdit &&
+                !cancelled &&
+                claimMode !== "na";
 
               return (
                 <Fragment key={`${r.invoiceNumber}-${r.date}-${r.rowIndex}`}>
@@ -1033,7 +1060,7 @@ export default function OrdersPage() {
                           className="text-zinc-600"
                           title={
                             !canFullOrderEdit
-                              ? "Enable “Edit all order details” on your account to change products, delivery, fees, and status."
+                              ? "Ask a superadmin to enable “Edit Superadmin” for your account (Accounts) to change status, line items, delivery, and fees."
                               : isPickupDelivery(dm) && claimMode === "claimed"
                                 ? "Claimed pick-up orders cannot be line-edited."
                                 : isNonPickupDelivery(dm) && !sameOrderDay
@@ -1062,6 +1089,7 @@ export default function OrdersPage() {
                               const on = e.target.checked;
                               setLineEditOpen((prev) => ({ ...prev, [inv]: on }));
                               if (on) {
+                                setLineEditSuperOpen((prev) => ({ ...prev, [inv]: false }));
                                 setLineEditDrafts((prev) => ({
                                   ...prev,
                                   [inv]: rowToLineEditDraft(r, productKeys),
@@ -1080,19 +1108,57 @@ export default function OrdersPage() {
                         </label>
                       )}
                     </td>
+                    <td className="px-3 py-2 text-center align-top">
+                      {!isSuperadmin ? (
+                        <span className="text-zinc-600" title="Superadmin only">
+                          —
+                        </span>
+                      ) : !canFullOrderEdit ? (
+                        <span className="text-zinc-600" title="Enable Edit Superadmin permission on your account">
+                          —
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={!allowSuperLineEdit || savingLineEdit === inv}
+                          title={
+                            !allowSuperLineEdit
+                              ? cancelled
+                                ? "Cancelled orders cannot be line-edited."
+                                : claimMode === "na"
+                                  ? "This row cannot be edited."
+                                  : "Cannot use superadmin edit for this row."
+                              : "Open line editor with superadmin override (bypasses claim / same-day locks on save)"
+                          }
+                          onClick={() => {
+                            setLineEditSuperOpen((prev) => ({ ...prev, [inv]: true }));
+                            setLineEditOpen((prev) => ({ ...prev, [inv]: false }));
+                            setLineEditDrafts((prev) => ({
+                              ...prev,
+                              [inv]: rowToLineEditDraft(r, productKeys),
+                            }));
+                          }}
+                          className="rounded-lg bg-red-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {savingLineEdit === inv ? "…" : "Edit"}
+                        </button>
+                      )}
+                    </td>
                   </tr>
-                  {editOn && draft ? (
+                  {(editOn || editSuperOn) && draft ? (
                     <tr className="bg-zinc-950/60">
                       <td colSpan={tbodyColumnCount} className="border-t border-white/10 p-4">
                         <OrderLineEditForm
                           productKeys={productKeys}
                           draft={draft}
+                          superMode={editSuperOn}
                           onChange={(next) =>
                             setLineEditDrafts((prev) => ({ ...prev, [inv]: next }))
                           }
                           onSave={() => void saveLineEdit(inv)}
                           onCancel={() => {
                             setLineEditOpen((prev) => ({ ...prev, [inv]: false }));
+                            setLineEditSuperOpen((prev) => ({ ...prev, [inv]: false }));
                             setLineEditDrafts((prev) => {
                               const n = { ...prev };
                               delete n[inv];

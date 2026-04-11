@@ -8,7 +8,7 @@ function getSecret(): Uint8Array {
     (process.env.NODE_ENV === "development" ? "dev-insecure-admin-secret-min-16ch" : "");
   if (!s || s.length < 16) {
     throw new Error(
-      "Set ADMIN_AUTH_SECRET in .env.local (at least 16 characters) for admin authentication.",
+      "ADMIN_AUTH_SECRET is missing or shorter than 16 characters. On a server (e.g. droplet), set it in the process environment or a .env file loaded at startup — not only on your laptop.",
     );
   }
   return new TextEncoder().encode(s);
