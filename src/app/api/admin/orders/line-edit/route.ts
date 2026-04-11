@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { applyLineDetailsToRow, mergeOrderRowWithAdjustment } from "@/data/admin/orderAdjustmentMerge";
-import { getProductClaimDisplay } from "@/data/admin/orderClaim";
+import {
+  getProductClaimDisplay,
+  isNonPickupDelivery,
+  isPickupDelivery,
+  isSameLocalCalendarDay,
+} from "@/data/admin/orderClaim";
 import { lookupInvoiceParsedRow } from "@/data/admin/orderInvoiceLookup";
 import {
   loadOrderAdjustments,
@@ -144,11 +149,28 @@ export async function POST(req: Request) {
     invoiceNumber,
     claims,
   });
-  if (mode === "claimed") {
-    return NextResponse.json({ error: "This order is already claimed; line items cannot be edited." }, { status: 400 });
-  }
   if (mode === "na") {
     return NextResponse.json({ error: "This order cannot be edited." }, { status: 400 });
+  }
+
+  const proposedDm = String(proposed["deliveryMethod"] ?? "");
+  const sourceDay = String(found.sourceDate ?? "").slice(0, 10);
+
+  if (isNonPickupDelivery(proposedDm)) {
+    if (!isSameLocalCalendarDay(sourceDay)) {
+      return NextResponse.json(
+        {
+          error:
+            "Delivery orders can only be edited on the same calendar day as the order (local time).",
+        },
+        { status: 400 },
+      );
+    }
+  } else if (isPickupDelivery(proposedDm) && mode === "claimed") {
+    return NextResponse.json(
+      { error: "Claimed pick-up orders cannot be edited." },
+      { status: 400 },
+    );
   }
 
   const next: OrderAdjustment = {

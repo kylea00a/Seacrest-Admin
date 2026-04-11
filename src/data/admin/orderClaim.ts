@@ -36,6 +36,30 @@ export function isOrderClaimedForInventory(args: {
 }
 
 /** UI label: delivery + paid → auto claimed; pick-up + paid + claim record → claimed; pick-up + paid else → needs button */
+/** Today as YYYY-MM-DD in a given IANA zone (default Philippines — matches business “order day”). */
+export function calendarYmdInTimeZone(now: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
+/**
+ * Whether `dateStr` (YYYY-MM-DD import/order day) is the same calendar day as “now” in `timeZone`.
+ * Used for delivery line-edit window so server and UI agree (avoid pure UTC vs local drift).
+ */
+export function isSameLocalCalendarDay(
+  dateStr: string,
+  now: Date = new Date(),
+  timeZone: string = "Asia/Manila",
+): boolean {
+  const d = String(dateStr ?? "").trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+  return d === calendarYmdInTimeZone(now, timeZone);
+}
+
 export function getProductClaimDisplay(args: {
   deliveryMethod: string;
   status: string;

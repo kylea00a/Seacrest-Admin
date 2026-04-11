@@ -7,7 +7,12 @@ import type { OrdersImportSummary } from "@/data/admin/types";
 import OrdersDateRangePicker from "../_components/OrdersDateRangePicker";
 import { useAdminProductKeys } from "../_components/useAdminProductKeys";
 import { courierBucket } from "@/data/admin/deliveryGrouping";
-import { getProductClaimDisplay } from "@/data/admin/orderClaim";
+import {
+  getProductClaimDisplay,
+  isNonPickupDelivery,
+  isPickupDelivery,
+  isSameLocalCalendarDay,
+} from "@/data/admin/orderClaim";
 import type { OrderClaimRecord } from "@/data/admin/types";
 
 type ParsedRow = {
@@ -875,8 +880,19 @@ export default function OrdersPage() {
                 claims,
               });
               const statusComplete = (r.status ?? "").toLowerCase().includes("complete");
+              const dm = r.deliveryMethod ?? "";
+              const sameOrderDay = isSameLocalCalendarDay(r.date);
+              const hideLineEditToggle =
+                claimMode === "na" ||
+                (isPickupDelivery(dm) && claimMode === "claimed") ||
+                (isNonPickupDelivery(dm) && !sameOrderDay);
               const allowLineEdit =
-                (claimMode === "claim" || claimMode === "unpaid") && !statusComplete;
+                !statusComplete &&
+                claimMode !== "na" &&
+                ((isNonPickupDelivery(dm) && sameOrderDay) ||
+                  (isPickupDelivery(dm) &&
+                    claimMode !== "claimed" &&
+                    (claimMode === "claim" || claimMode === "unpaid")));
               const editOn = lineEditOpen[inv] ?? false;
               const draft = lineEditDrafts[inv];
 
@@ -1002,36 +1018,51 @@ export default function OrdersPage() {
                       })()}
                     </td>
                     <td className="px-3 py-2 text-center align-top">
-                      <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-zinc-400">
-                        <input
-                          type="checkbox"
-                          checked={editOn}
-                          disabled={!allowLineEdit || savingLineEdit === inv}
+                      {hideLineEditToggle ? (
+                        <span
+                          className="text-zinc-600"
                           title={
-                            !allowLineEdit
-                              ? "Only available before the order is claimed."
-                              : "Edit package / subscription / repurchase quantities and delivery"
+                            isPickupDelivery(dm) && claimMode === "claimed"
+                              ? "Claimed pick-up orders cannot be line-edited."
+                              : isNonPickupDelivery(dm) && !sameOrderDay
+                                ? "Delivery orders can only be line-edited on the order day (local time)."
+                                : undefined
                           }
-                          onChange={(e) => {
-                            const on = e.target.checked;
-                            setLineEditOpen((prev) => ({ ...prev, [inv]: on }));
-                            if (on) {
-                              setLineEditDrafts((prev) => ({
-                                ...prev,
-                                [inv]: rowToLineEditDraft(r, productKeys),
-                              }));
-                            } else {
-                              setLineEditDrafts((prev) => {
-                                const next = { ...prev };
-                                delete next[inv];
-                                return next;
-                              });
+                        >
+                          —
+                        </span>
+                      ) : (
+                        <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-zinc-400">
+                          <input
+                            type="checkbox"
+                            checked={editOn}
+                            disabled={!allowLineEdit || savingLineEdit === inv}
+                            title={
+                              allowLineEdit
+                                ? "Edit package / subscription / repurchase quantities and delivery"
+                                : "Cannot edit this line"
                             }
-                          }}
-                          className="rounded border-white/20"
-                        />
-                        Edit
-                      </label>
+                            onChange={(e) => {
+                              const on = e.target.checked;
+                              setLineEditOpen((prev) => ({ ...prev, [inv]: on }));
+                              if (on) {
+                                setLineEditDrafts((prev) => ({
+                                  ...prev,
+                                  [inv]: rowToLineEditDraft(r, productKeys),
+                                }));
+                              } else {
+                                setLineEditDrafts((prev) => {
+                                  const next = { ...prev };
+                                  delete next[inv];
+                                  return next;
+                                });
+                              }
+                            }}
+                            className="rounded border-white/20"
+                          />
+                          Edit
+                        </label>
+                      )}
                     </td>
                   </tr>
                   {editOn && draft ? (
