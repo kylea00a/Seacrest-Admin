@@ -156,12 +156,13 @@ export async function POST(req: Request) {
   const proposedDm = String(proposed["deliveryMethod"] ?? "");
   const sourceDay = String(found.sourceDate ?? "").slice(0, 10);
 
+  // Delivery (incl. paid → UI "Claimed"): editable until end of order calendar day in PH; not blocked by mode === "claimed".
   if (isNonPickupDelivery(proposedDm)) {
     if (!isSameLocalCalendarDay(sourceDay)) {
       return NextResponse.json(
         {
           error:
-            "Delivery orders can only be edited on the same calendar day as the order (local time).",
+            "Delivery line items can only be edited on the order's calendar day (Asia/Manila). The next day they are locked.",
         },
         { status: 400 },
       );

@@ -882,6 +882,7 @@ export default function OrdersPage() {
               const statusComplete = (r.status ?? "").toLowerCase().includes("complete");
               const dm = r.deliveryMethod ?? "";
               const sameOrderDay = isSameLocalCalendarDay(r.date);
+              /** Pick-up: hide edit once Claimed. Delivery: hide only after the order calendar day (PH); paid delivery stays "Claimed" in UI but remains editable until end of that day. */
               const hideLineEditToggle =
                 claimMode === "na" ||
                 (isPickupDelivery(dm) && claimMode === "claimed") ||
@@ -1029,7 +1030,7 @@ export default function OrdersPage() {
                             isPickupDelivery(dm) && claimMode === "claimed"
                               ? "Claimed pick-up orders cannot be line-edited."
                               : isNonPickupDelivery(dm) && !sameOrderDay
-                                ? "Delivery orders can only be line-edited on the order day (local time)."
+                                ? "After the order day (PH time), delivery line edits are locked — even if it showed Claimed when it was still the same day."
                                 : undefined
                           }
                         >
@@ -1042,9 +1043,13 @@ export default function OrdersPage() {
                             checked={editOn}
                             disabled={!allowLineEdit || savingLineEdit === inv}
                             title={
-                              allowLineEdit
-                                ? "Edit package / subscription / repurchase quantities and delivery"
-                                : "Cannot edit this line"
+                              !allowLineEdit
+                                ? "Cannot edit this line"
+                                : isNonPickupDelivery(dm)
+                                  ? claimMode === "claimed"
+                                    ? "Claimed delivery: line items stay editable until end of this order day (PH time)."
+                                    : "Edit line items — delivery can be changed only on the order day (PH time)."
+                                  : "Edit package / subscription / repurchase quantities and delivery"
                             }
                             onChange={(e) => {
                               const on = e.target.checked;
