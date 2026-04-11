@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -32,11 +33,22 @@ export default function AdminNav() {
 
   return (
     <div className="flex items-center justify-between gap-4 border-b border-zinc-200 bg-white/60 px-4 py-3 backdrop-blur">
-      <div>
-        <div className="text-sm font-semibold tracking-tight text-zinc-900">
-          Seacrest Company Admin
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="shrink-0 overflow-hidden rounded-lg bg-black ring-1 ring-zinc-200/80">
+          <Image
+            src="/seacrest-logo.jpg"
+            alt="SeaCrest"
+            width={256}
+            height={102}
+            className="h-8 w-auto object-contain sm:h-9"
+          />
         </div>
-        <div className="text-xs text-zinc-600">Departments, expenses, and recurring dues</div>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold tracking-tight text-zinc-900">
+            Company Admin
+          </div>
+          <div className="text-xs text-zinc-600">Departments, expenses, and recurring dues</div>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
