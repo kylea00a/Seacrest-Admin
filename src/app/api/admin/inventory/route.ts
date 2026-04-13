@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { computeClaimedOutTotalsForRange } from "@/data/admin/inventoryCompute";
+import { computeClaimedOutDetailsForRange, computeClaimedOutTotalsForRange } from "@/data/admin/inventoryCompute";
 import {
   loadAdminSettings,
   loadInventoryEnding,
@@ -78,7 +78,10 @@ export async function GET(req: Request) {
   const supply = loadInventorySupply();
   const ending = loadInventoryEnding();
 
-  const outPeriod = await computeClaimedOutTotalsForRange(start, end);
+  const [outPeriod, outDetails] = await Promise.all([
+    computeClaimedOutTotalsForRange(start, end),
+    computeClaimedOutDetailsForRange(start, end),
+  ]);
   const deliveryInPeriod = sumSupplyByProductInRange(supply.entries, start, end);
 
   const productNames = settings.products.map((p) => p.name);
@@ -125,12 +128,21 @@ export async function GET(req: Request) {
     }
   }
 
+  let totalDeliveryIn = 0;
+  let totalOut = 0;
+  for (const r of rows) {
+    totalDeliveryIn += r.deliveryIn;
+    totalOut += r.out;
+  }
+
   return NextResponse.json({
     start,
     end,
     productNames,
     rows,
     entries: entriesInPeriod,
+    outDetails,
+    totals: { deliveryIn: totalDeliveryIn, out: totalOut },
     ending: endingRec,
     canEditEncodedEnding,
     expectedEndingBy,

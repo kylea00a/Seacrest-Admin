@@ -19,6 +19,18 @@ type Entry = {
   at: string;
 };
 
+type OutOrderDetail = {
+  invoiceNumber: string;
+  effectiveDate: string;
+  sourceDate: string;
+  distributorName: string;
+  lines: Array<{
+    kind: "package" | "subscription" | "repurchase";
+    productName: string;
+    qty: number;
+  }>;
+};
+
 type EndingSnapshot = {
   date: string;
   encodedAt: string;
@@ -52,6 +64,8 @@ export default function InventoryPage() {
   const [quantity, setQuantity] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const [outDetails, setOutDetails] = useState<OutOrderDetail[]>([]);
+  const [dayTotals, setDayTotals] = useState<{ deliveryIn: number; out: number } | null>(null);
 
   const load = useCallback(async () => {
     if (!startDate || !endDate) return;
@@ -63,6 +77,8 @@ export default function InventoryPage() {
       const json = (await res.json()) as {
         rows?: Row[];
         entries?: Entry[];
+        outDetails?: OutOrderDetail[];
+        totals?: { deliveryIn: number; out: number };
         productNames?: string[];
         ending?: EndingSnapshot | null;
         canEditEncodedEnding?: boolean;
@@ -75,6 +91,8 @@ export default function InventoryPage() {
       if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
       setRows(json.rows ?? []);
       setEntries(json.entries ?? []);
+      setOutDetails(json.outDetails ?? []);
+      setDayTotals(json.totals ?? null);
       setProductNames(json.productNames ?? []);
       setEnding((json.ending ?? null) as EndingSnapshot | null);
       setCanEditEncodedEnding(Boolean(json.canEditEncodedEnding));
@@ -132,6 +150,9 @@ export default function InventoryPage() {
 
   const dayDescription = rangeLabel.start || (pickDay ? format(pickDay, "yyyy-MM-dd") : "");
   const hasDiscrepancy = Object.keys(discrepancyBy).length > 0;
+
+  const lineKindLabel = (k: OutOrderDetail["lines"][0]["kind"]) =>
+    k === "package" ? "Package" : k === "subscription" ? "Subscription" : "Repurchase";
 
   const saveEnding = async () => {
     if (!dayDescription || !/^\d{4}-\d{2}-\d{2}$/.test(dayDescription)) return;
@@ -237,6 +258,40 @@ export default function InventoryPage() {
           </button>
         </div>
       </form>
+
+      {dayTotals && dayDescription ? (
+        <div className="admin-card-inset mt-6">
+          <div className="text-sm font-semibold text-zinc-200">Day totals ({dayDescription})</div>
+          <p className="mt-1 text-xs text-zinc-500">
+            Aggregates for the selected filter date: stock received (delivery in) vs. inventory out from claimed orders
+            (effective date).
+          </p>
+          <div className="mt-3 flex flex-wrap gap-x-8 gap-y-2 text-sm">
+            <div>
+              <span className="text-zinc-500">Delivery in</span>{" "}
+              <span className="font-semibold tabular-nums text-emerald-300/90">{dayTotals.deliveryIn}</span>
+            </div>
+            <div>
+              <span className="text-zinc-500">Out (claimed)</span>{" "}
+              <span className="font-semibold tabular-nums text-rose-300/90">{dayTotals.out}</span>
+            </div>
+            <div>
+              <span className="text-zinc-500">Net</span>{" "}
+              <span
+                className={`font-semibold tabular-nums ${
+                  dayTotals.deliveryIn - dayTotals.out < 0
+                    ? "text-amber-400"
+                    : dayTotals.deliveryIn - dayTotals.out > 0
+                      ? "text-emerald-400/90"
+                      : "text-zinc-300"
+                }`}
+              >
+                {dayTotals.deliveryIn - dayTotals.out}
+              </span>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-6">
         <div className="text-sm font-semibold text-zinc-200">Product flow ({dayDescription || "—"})</div>
@@ -350,6 +405,54 @@ export default function InventoryPage() {
           >
             {savingEnding ? "Saving…" : ending?.locked ? (canEditEncodedEnding ? "Save changes" : "Encoded") : "Encode ending"}
           </button>
+        </div>
+      </div>
+
+      <div className="mt-6">
+        <div className="text-sm font-semibold text-zinc-200">Out — by order ({dayDescription || "—"})</div>
+        <p className="mt-1 text-xs text-zinc-500">
+          Each row is a claimed order with effective date on this day. Line types: package, subscription, or repurchase.
+        </p>
+        <div className="admin-table-wrap mt-2 max-h-96 overflow-auto">
+          <table className="min-w-full text-xs">
+            <thead className="sticky top-0 bg-black/40 text-zinc-300">
+              <tr>
+                <th className="px-3 py-2 text-left">Invoice</th>
+                <th className="px-3 py-2 text-left whitespace-nowrap">Effective</th>
+                <th className="px-3 py-2 text-left whitespace-nowrap">Source day</th>
+                <th className="px-3 py-2 text-left">Distributor</th>
+                <th className="px-3 py-2 text-left">Lines</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/10">
+              {outDetails.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-3 text-zinc-500" colSpan={5}>
+                    No claimed out orders for this effective date.
+                  </td>
+                </tr>
+              ) : (
+                outDetails.map((o) => (
+                  <tr key={`${o.invoiceNumber}-${o.effectiveDate}`} className="align-top bg-black/10 text-zinc-100">
+                    <td className="px-3 py-2 font-medium">{o.invoiceNumber}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-zinc-400">{o.effectiveDate}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-zinc-400">{o.sourceDate}</td>
+                    <td className="px-3 py-2">{o.distributorName}</td>
+                    <td className="px-3 py-2">
+                      <ul className="list-inside list-disc space-y-0.5 text-zinc-300">
+                        {o.lines.map((ln, i) => (
+                          <li key={`${ln.kind}-${ln.productName}-${i}`}>
+                            <span className="text-zinc-500">[{lineKindLabel(ln.kind)}]</span> {ln.productName}{" "}
+                            <span className="tabular-nums text-rose-300/90">×{ln.qty}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
