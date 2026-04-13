@@ -335,8 +335,9 @@ function OrderLineEditForm({
 }
 
 export default function OrdersPage() {
-  const { can } = useAdminSession();
+  const { can, account } = useAdminSession();
   const canFullOrderEdit = can("ordersFullEdit");
+  const isSuperadmin = Boolean(account?.isSuperadmin);
   const productKeys = useAdminProductKeys();
   const [index, setIndex] = useState<OrdersImportSummary[]>([]);
   const [rows, setRows] = useState<Array<ParsedRow & { date: string }>>([]);
@@ -363,6 +364,7 @@ export default function OrdersPage() {
   /** YYYY-MM-DD — editable in New Edit, sent on save with bypass header. */
   const [claimDateDrafts, setClaimDateDrafts] = useState<Record<string, string>>({});
   const [savingLineEdit, setSavingLineEdit] = useState<string>("");
+  const [resettingClaims, setResettingClaims] = useState(false);
 
   const { startDate, endDate } = useMemo(() => {
     if (!pickRange?.from) return { startDate: "", endDate: "" };
@@ -433,6 +435,26 @@ export default function OrdersPage() {
   useEffect(() => {
     void refetchCompiledRows();
   }, [refetchCompiledRows]);
+
+  const resetClaimDatesApr10 = async () => {
+    if (!isSuperadmin || !canFullOrderEdit) return;
+    setResettingClaims(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/orders/claims-reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetYmd: "2026-04-10", excludeLatestUploadDay: true }),
+      });
+      const json = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
+      await refetchCompiledRows();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setResettingClaims(false);
+    }
+  };
 
   /** Reset pagination when filters/range change — not when `rows` refetches (e.g. after saving a line edit). */
   useEffect(() => {
@@ -681,6 +703,17 @@ export default function OrdersPage() {
               </>
             ) : null}
           </div>
+        {isSuperadmin && canFullOrderEdit ? (
+          <button
+            type="button"
+            onClick={() => void resetClaimDatesApr10()}
+            disabled={resettingClaims}
+            className="rounded-xl bg-amber-400 px-3 py-2 text-xs font-semibold text-amber-950 hover:bg-amber-300 disabled:opacity-60"
+            title="Superadmin tool: reset claim dates to 2026-04-10 for paid claimed orders, excluding the latest uploaded import day."
+          >
+            {resettingClaims ? "Resetting…" : "Reset claim dates → Apr 10"}
+          </button>
+        ) : null}
         </div>
       </div>
 
