@@ -10,6 +10,8 @@ const FREQUENCIES: Array<{ value: ExpenseFrequency; label: string }> = [
   { value: "monthly", label: "Monthly" },
   { value: "quarterly", label: "Quarterly" },
   { value: "yearly", label: "Yearly" },
+  { value: "once", label: "One-time" },
+  { value: "customMonths", label: "Custom (every N months)" },
 ];
 
 const FALLBACK_EXPENSE_CATEGORIES = ["BIR", "Rent", "Utility", "Maintenance", "Payroll", "Supplies", "Other"];
@@ -39,6 +41,8 @@ export default function AddExpensePage() {
   const [amount, setAmount] = useState<string>("");
   const [category, setCategory] = useState<string>("Rent");
   const [frequency, setFrequency] = useState<ExpenseFrequency>("monthly");
+  const [repeatEveryMonths, setRepeatEveryMonths] = useState<string>("3");
+  const [repeatCount, setRepeatCount] = useState<string>("");
   const [startDate, setStartDate] = useState<string>(todayISO());
   const [departmentId, setDepartmentId] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
@@ -101,7 +105,7 @@ export default function AddExpensePage() {
     if (!category.trim()) return setError("Category is required.");
     if (!startDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return setError("Start date is required.");
 
-    const body = {
+    const body: Record<string, unknown> = {
       title: title.trim(),
       amount: amt,
       category: category.trim(),
@@ -111,6 +115,16 @@ export default function AddExpensePage() {
       notes: notes.trim() ? notes.trim() : undefined,
       paymentStatus,
     };
+    if (frequency === "customMonths") {
+      const every = Number(repeatEveryMonths);
+      const count = Number(repeatCount);
+      if (!Number.isFinite(every) || every <= 0) return setError("Repeat every months must be a positive number.");
+      body.repeatEveryMonths = Math.floor(every);
+      if (repeatCount.trim()) {
+        if (!Number.isFinite(count) || count <= 0) return setError("Payment plan count must be a positive number.");
+        body.repeatCount = Math.floor(count);
+      }
+    }
 
     const res = await fetch("/api/admin/expenses", {
       method: "POST",
@@ -207,6 +221,36 @@ export default function AddExpensePage() {
               </select>
             </div>
           </div>
+
+          {frequency === "customMonths" ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="text-sm font-semibold">Repeat every (months)</label>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={repeatEveryMonths}
+                  onChange={(e) => setRepeatEveryMonths(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500/60"
+                  placeholder="e.g., 3"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-sm font-semibold">Payment plan count (optional)</label>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={repeatCount}
+                  onChange={(e) => setRepeatCount(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500/60"
+                  placeholder="e.g., 4 payments"
+                />
+              </div>
+            </div>
+          ) : null}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>

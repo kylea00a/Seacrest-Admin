@@ -27,6 +27,7 @@ const DELIVERY_TRACKING_FILE = path.join(ADMIN_DATA_DIR, "deliveryTracking.json"
 const ORDER_ADJUSTMENTS_FILE = path.join(ADMIN_DATA_DIR, "orderAdjustments.json");
 const ORDER_CLAIMS_FILE = path.join(ADMIN_DATA_DIR, "orderClaims.json");
 const INVENTORY_SUPPLY_FILE = path.join(ADMIN_DATA_DIR, "inventorySupply.json");
+const INVENTORY_ENDING_FILE = path.join(ADMIN_DATA_DIR, "inventoryEnding.json");
 
 function ensureAdminDir() {
   if (!fs.existsSync(ADMIN_DATA_DIR)) fs.mkdirSync(ADMIN_DATA_DIR, { recursive: true });
@@ -257,5 +258,23 @@ export function loadInventorySupply(): InventorySupplyFile {
 
 export function saveInventorySupply(data: InventorySupplyFile) {
   writeJsonFile(INVENTORY_SUPPLY_FILE, data);
+}
+
+export type InventoryEndingFile = {
+  /** YYYY-MM-DD -> ending snapshot */
+  byDate: Record<string, import("./types").InventoryEndingSnapshot>;
+};
+
+export function loadInventoryEnding(): InventoryEndingFile {
+  const raw = readJsonFile<unknown>(INVENTORY_ENDING_FILE, { byDate: {} });
+  const r = raw as Record<string, unknown> | null;
+  if (r && typeof r === "object" && r["byDate"] && typeof r["byDate"] === "object") {
+    return raw as InventoryEndingFile;
+  }
+  return { byDate: {} };
+}
+
+export function saveInventoryEnding(data: InventoryEndingFile) {
+  writeJsonFile(INVENTORY_ENDING_FILE, data);
 }
 

@@ -13,13 +13,23 @@ type ExpenseCreateBody = {
   category?: unknown;
   frequency?: unknown;
   startDate?: unknown;
+  repeatEveryMonths?: unknown;
+  repeatCount?: unknown;
   departmentId?: unknown;
   notes?: unknown;
   paymentStatus?: unknown;
 };
 
 function isFrequency(v: unknown): v is ExpenseFrequency {
-  return v === "daily" || v === "weekly" || v === "monthly" || v === "quarterly" || v === "yearly";
+  return (
+    v === "daily" ||
+    v === "weekly" ||
+    v === "monthly" ||
+    v === "quarterly" ||
+    v === "yearly" ||
+    v === "once" ||
+    v === "customMonths"
+  );
 }
 
 function isDateOnly(v: unknown): v is string {
@@ -29,6 +39,19 @@ function isDateOnly(v: unknown): v is string {
 
 function isPaymentStatus(v: unknown): v is PaymentStatus {
   return v === "paid" || v === "unpaid";
+}
+
+function toPositiveIntOrNull(v: unknown): number | null {
+  const n =
+    typeof v === "number"
+      ? v
+      : typeof v === "string"
+        ? Number(v.trim())
+        : NaN;
+  if (!Number.isFinite(n)) return null;
+  const i = Math.floor(n);
+  if (i <= 0) return null;
+  return i;
 }
 
 export async function GET(req: Request) {
@@ -84,6 +107,9 @@ export async function POST(req: Request) {
   const paymentStatus: PaymentStatus =
     body.paymentStatus == null ? "unpaid" : isPaymentStatus(body.paymentStatus) ? body.paymentStatus : "unpaid";
 
+  const repeatEveryMonths = frequency === "customMonths" ? toPositiveIntOrNull(body.repeatEveryMonths) ?? 1 : undefined;
+  const repeatCount = frequency === "customMonths" ? toPositiveIntOrNull(body.repeatCount) ?? undefined : undefined;
+
   const expense: Expense = {
     id: randomUUID(),
     title,
@@ -91,6 +117,8 @@ export async function POST(req: Request) {
     category,
     frequency,
     startDate,
+    ...(repeatEveryMonths ? { repeatEveryMonths } : {}),
+    ...(repeatCount ? { repeatCount } : {}),
     departmentId,
     notes,
     paymentStatus,

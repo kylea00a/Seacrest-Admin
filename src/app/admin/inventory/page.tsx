@@ -19,6 +19,14 @@ type Entry = {
   at: string;
 };
 
+type EndingSnapshot = {
+  date: string;
+  encodedAt: string;
+  encodedBy?: string;
+  locked: boolean;
+  counts: Record<string, number>;
+};
+
 export default function InventoryPage() {
   const [pickDay, setPickDay] = useState<Date | undefined>(() => startOfDay(new Date()));
 
@@ -31,6 +39,12 @@ export default function InventoryPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [productNames, setProductNames] = useState<string[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [ending, setEnding] = useState<EndingSnapshot | null>(null);
+  const [canEditEncodedEnding, setCanEditEncodedEnding] = useState(false);
+  const [expectedEndingBy, setExpectedEndingBy] = useState<Record<string, number>>({});
+  const [discrepancyBy, setDiscrepancyBy] = useState<Record<string, number>>({});
+  const [endingDraft, setEndingDraft] = useState<Record<string, string>>({});
+  const [savingEnding, setSavingEnding] = useState(false);
   const [rangeLabel, setRangeLabel] = useState<{ start: string; end: string }>({ start: "", end: "" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +64,10 @@ export default function InventoryPage() {
         rows?: Row[];
         entries?: Entry[];
         productNames?: string[];
+        ending?: EndingSnapshot | null;
+        canEditEncodedEnding?: boolean;
+        expectedEndingBy?: Record<string, number>;
+        discrepancyBy?: Record<string, number>;
         start?: string;
         end?: string;
         error?: string;
@@ -58,6 +76,16 @@ export default function InventoryPage() {
       setRows(json.rows ?? []);
       setEntries(json.entries ?? []);
       setProductNames(json.productNames ?? []);
+      setEnding((json.ending ?? null) as EndingSnapshot | null);
+      setCanEditEncodedEnding(Boolean(json.canEditEncodedEnding));
+      setExpectedEndingBy((json.expectedEndingBy ?? {}) as Record<string, number>);
+      setDiscrepancyBy((json.discrepancyBy ?? {}) as Record<string, number>);
+      const nextDraft: Record<string, string> = {};
+      for (const p of json.productNames ?? []) {
+        const v = (json.ending as EndingSnapshot | null)?.counts?.[p];
+        nextDraft[p] = v != null ? String(v) : "";
+      }
+      setEndingDraft(nextDraft);
       if (json.start && json.end) setRangeLabel({ start: json.start, end: json.end });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -103,6 +131,33 @@ export default function InventoryPage() {
   };
 
   const dayDescription = rangeLabel.start || (pickDay ? format(pickDay, "yyyy-MM-dd") : "");
+  const hasDiscrepancy = Object.keys(discrepancyBy).length > 0;
+
+  const saveEnding = async () => {
+    if (!dayDescription || !/^\d{4}-\d{2}-\d{2}$/.test(dayDescription)) return;
+    setSavingEnding(true);
+    setError(null);
+    try {
+      const counts: Record<string, number> = {};
+      for (const p of productNames) {
+        const n = Number((endingDraft[p] ?? "").trim());
+        counts[p] = Number.isFinite(n) && n >= 0 ? n : 0;
+      }
+      const res = await fetch("/api/admin/inventory", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: dayDescription, counts }),
+      });
+      const json = (await res.json()) as { ok?: boolean; ending?: EndingSnapshot; error?: string };
+      if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
+      setEnding((json.ending ?? null) as EndingSnapshot | null);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingEnding(false);
+    }
+  };
 
   return (
     <div className="admin-card">
@@ -193,12 +248,15 @@ export default function InventoryPage() {
                 <th className="px-3 py-2 text-right">Delivery in</th>
                 <th className="px-3 py-2 text-right">Out (claimed)</th>
                 <th className="px-3 py-2 text-right">Net</th>
+                <th className="px-3 py-2 text-right whitespace-nowrap">Ending (encode)</th>
+                <th className="px-3 py-2 text-right whitespace-nowrap">Expected</th>
+                <th className="px-3 py-2 text-right whitespace-nowrap">Discrepancy</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
               {rows.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-4 text-zinc-500" colSpan={4}>
+                  <td className="px-3 py-4 text-zinc-500" colSpan={7}>
                     No products in settings yet, or no movement on this day.
                   </td>
                 </tr>
@@ -215,11 +273,83 @@ export default function InventoryPage() {
                     >
                       {r.netPeriod}
                     </td>
+                    <td className="px-3 py-2 text-right">
+                      <input
+                        type="number"
+                        min={0}
+                        step="any"
+                        value={endingDraft[r.productName] ?? ""}
+                        onChange={(e) =>
+                          setEndingDraft((prev) => ({ ...prev, [r.productName]: e.target.value }))
+                        }
+                        disabled={!canEditEncodedEnding}
+                        className="admin-input w-24 text-right tabular-nums disabled:opacity-60"
+                        placeholder="0"
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
+                      {expectedEndingBy[r.productName] != null ? expectedEndingBy[r.productName] : "—"}
+                    </td>
+                    <td
+                      className={[
+                        "px-3 py-2 text-right tabular-nums font-semibold",
+                        discrepancyBy[r.productName]
+                          ? "text-rose-300"
+                          : ending?.counts?.[r.productName] != null
+                            ? "text-emerald-300/90"
+                            : "text-zinc-500",
+                      ].join(" ")}
+                    >
+                      {discrepancyBy[r.productName] != null ? discrepancyBy[r.productName] : "—"}
+                    </td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-xs text-zinc-400">
+            {ending?.locked ? (
+              <>
+                Encoded: <span className="font-semibold text-zinc-200">{new Date(ending.encodedAt).toLocaleString()}</span>
+                {ending.encodedBy ? (
+                  <>
+                    {" "}
+                    by <span className="font-semibold text-zinc-200">{ending.encodedBy}</span>
+                  </>
+                ) : null}
+                {hasDiscrepancy ? (
+                  <>
+                    {" "}
+                    • <span className="font-semibold text-rose-300">Discrepancy detected</span>
+                  </>
+                ) : (
+                  <>
+                    {" "}
+                    • <span className="font-semibold text-emerald-300/90">No discrepancy</span>
+                  </>
+                )}
+              </>
+            ) : (
+              <span>Enter ending inventory and click Encode to lock it.</span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => void saveEnding()}
+            disabled={savingEnding || !dayDescription}
+            className="admin-btn-primary"
+            title={
+              ending?.locked && !canEditEncodedEnding
+                ? "Already encoded (locked)."
+                : ending?.locked && canEditEncodedEnding
+                  ? "Superadmin override enabled: save updates to encoded ending inventory."
+                  : "Save ending inventory and lock this day."
+            }
+          >
+            {savingEnding ? "Saving…" : ending?.locked ? (canEditEncodedEnding ? "Save changes" : "Encoded") : "Encode ending"}
+          </button>
         </div>
       </div>
 

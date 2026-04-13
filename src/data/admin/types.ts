@@ -1,4 +1,11 @@
-export type ExpenseFrequency = "daily" | "weekly" | "monthly" | "quarterly" | "yearly";
+export type ExpenseFrequency =
+  | "daily"
+  | "weekly"
+  | "monthly"
+  | "quarterly"
+  | "yearly"
+  | "once"
+  | "customMonths";
 
 export type PaymentStatus = "paid" | "unpaid";
 
@@ -27,6 +34,15 @@ export interface Expense {
   category: ExpenseCategory;
   frequency: ExpenseFrequency;
   startDate: string; // YYYY-MM-DD (date-only)
+  /**
+   * When `frequency` is `customMonths`: repeat every N months (e.g. 3 = every 3 months).
+   * If omitted, treated as 1 month.
+   */
+  repeatEveryMonths?: number;
+  /**
+   * Optional cap for `customMonths` (payment plan). If omitted, repeats indefinitely.
+   */
+  repeatCount?: number;
   departmentId?: string;
   notes?: string;
   paymentStatus?: PaymentStatus; // if omitted, treated as "unpaid"
@@ -86,6 +102,11 @@ export interface AdminSettings {
   pettyCashCategories: string[];
   packages: AdminPackageItem[];
   products: AdminProductItem[];
+  /**
+   * If enabled, superadmin can edit an already-encoded ending inventory snapshot.
+   * When disabled, encoded ending inventory is read-only for everyone.
+   */
+  allowSuperadminEditEncodedInventory?: boolean;
   updatedAt: string; // ISO
 }
 
@@ -123,5 +144,18 @@ export interface InventorySupplyEntry {
   quantity: number;
   note?: string;
   at: string; // ISO
+}
+
+/** Staff-encoded ending inventory snapshot for a calendar day (YYYY-MM-DD). */
+export interface InventoryEndingSnapshot {
+  date: string;
+  encodedAt: string; // ISO
+  encodedBy?: string; // displayName
+  locked: boolean;
+  counts: Record<string, number>;
+  /** True when any product has non-zero discrepancy vs expected ending. */
+  hasDiscrepancy?: boolean;
+  /** Product -> (actual - expected) for non-zero entries. */
+  discrepancyBy?: Record<string, number>;
 }
 

@@ -51,6 +51,8 @@ export default function CalendarPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [inventoryDiscrepancyDates, setInventoryDiscrepancyDates] = useState<Set<string>>(new Set());
+  const [savingExpenseId, setSavingExpenseId] = useState<string>("");
 
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [showPaid, setShowPaid] = useState(true);
@@ -64,10 +66,15 @@ export default function CalendarPage() {
     async function load() {
       try {
         const res = await fetch(`/api/admin/calendar?year=${year}&month=${month}`, { cache: "no-store" });
-        const json = (await res.json()) as { events?: CalendarEvent[]; error?: string };
+        const json = (await res.json()) as {
+          events?: CalendarEvent[];
+          inventoryDiscrepancyDates?: string[];
+          error?: string;
+        };
         if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
         if (cancelled) return;
         setEvents(json.events ?? []);
+        setInventoryDiscrepancyDates(new Set((json.inventoryDiscrepancyDates ?? []).filter(Boolean)));
       } catch (e) {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : String(e));
@@ -134,6 +141,35 @@ export default function CalendarPage() {
     setMonth(d.getMonth() + 1);
   };
 
+  const togglePaid = async (ev: CalendarEvent) => {
+    const next = ev.paymentStatus === "paid" ? "unpaid" : "paid";
+    setSavingExpenseId(ev.expenseId);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/expenses/payment-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expenseId: ev.expenseId, paymentStatus: next }),
+      });
+      const json = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
+      // Reload month so both grid and day details update.
+      const r2 = await fetch(`/api/admin/calendar?year=${year}&month=${month}`, { cache: "no-store" });
+      const j2 = (await r2.json()) as {
+        events?: CalendarEvent[];
+        inventoryDiscrepancyDates?: string[];
+        error?: string;
+      };
+      if (!r2.ok) throw new Error(j2.error ?? `Failed with status ${r2.status}`);
+      setEvents(j2.events ?? []);
+      setInventoryDiscrepancyDates(new Set((j2.inventoryDiscrepancyDates ?? []).filter(Boolean)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingExpenseId("");
+    }
+  };
+
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
       <div className="admin-card">
@@ -187,6 +223,7 @@ export default function CalendarPage() {
             const inMonth = d.getMonth() === month - 1;
             const dayEvents = eventsByDate.get(iso) ?? [];
             const selected = selectedDate === iso;
+            const hasInvDiscrepancy = inventoryDiscrepancyDates.has(iso);
             return (
               <button
                 key={iso}
@@ -196,6 +233,7 @@ export default function CalendarPage() {
                   "min-h-[108px] rounded-xl border p-2 text-left align-top transition",
                   inMonth ? "border-white/10 bg-white/5 hover:bg-white/10" : "border-white/5 bg-white/[0.03] text-zinc-500",
                   selected ? "border-emerald-500/60 ring-2 ring-emerald-500/20" : "",
+                  hasInvDiscrepancy ? "border-rose-500/50" : "",
                 ].join(" ")}
               >
                 <div className="flex items-start justify-between gap-2">
@@ -204,6 +242,9 @@ export default function CalendarPage() {
                     <div className="text-[10px] font-semibold text-zinc-400">{dayEvents.length}</div>
                   )}
                 </div>
+                {hasInvDiscrepancy ? (
+                  <div className="mt-1 text-[10px] font-semibold text-rose-300">Inventory discrepancy</div>
+                ) : null}
                 <div className="mt-2 space-y-1">
                   {dayEvents.slice(0, 3).map((ev) => (
                     <div
@@ -265,9 +306,15 @@ export default function CalendarPage() {
               </div>
               <div className="mt-2 flex items-center justify-between gap-2">
                 <div className="text-[10px] font-semibold text-zinc-300">Status</div>
-                <span className={statusChipClass(ev.paymentStatus)}>
-                  {ev.paymentStatus === "paid" ? "Paid" : "Unpaid"}
-                </span>
+                <button
+                  type="button"
+                  onClick={() => void togglePaid(ev)}
+                  disabled={savingExpenseId === ev.expenseId}
+                  className={statusChipClass(ev.paymentStatus)}
+                  title="Click to toggle paid/unpaid"
+                >
+                  {savingExpenseId === ev.expenseId ? "Saving…" : ev.paymentStatus === "paid" ? "Paid" : "Unpaid"}
+                </button>
               </div>
             </div>
           ))}

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { loadDepartments, loadExpenses } from "@/data/admin/storage";
+import { loadDepartments, loadExpenses, loadInventoryEnding } from "@/data/admin/storage";
 import { buildCalendarEventsForMonth } from "@/data/admin/calendar";
 import { requireApiPermission } from "@/lib/adminApiAuth";
 
@@ -30,6 +30,13 @@ export async function GET(req: Request) {
     monthStart,
   });
 
-  return NextResponse.json({ events, monthStart: monthStartISO, monthEnd });
+  const inv = loadInventoryEnding();
+  const inventoryDiscrepancyDates = Object.values(inv.byDate ?? {})
+    .filter((r) => Boolean(r?.hasDiscrepancy))
+    .map((r) => r.date)
+    .filter((d) => d >= monthStartISO && d <= monthEnd)
+    .sort((a, b) => a.localeCompare(b));
+
+  return NextResponse.json({ events, monthStart: monthStartISO, monthEnd, inventoryDiscrepancyDates });
 }
 

@@ -1,24 +1,39 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { OrdersImportSummary } from "@/data/admin/types";
-import { isOrderExcludedFromSuccessMetrics, sumBreakdown, type ProductBreakdown } from "@/data/admin/ordersParse";
+import type { AdminSettings } from "@/data/admin/types";
+import { isOrderExcludedFromSuccessMetrics, type ProductBreakdown } from "@/data/admin/ordersParse";
 
 function countFmt(n: number) {
   return new Intl.NumberFormat().format(n);
 }
 
+function currency(n: number) {
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency: "PHP" }).format(n);
+  } catch {
+    return `${n}`;
+  }
+}
+
+function monthToRange(yyyyMm: string): { start: string; end: string } | null {
+  const m = yyyyMm.match(/^(\d{4})-(\d{2})$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]); // 1-12
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || mo < 1 || mo > 12) return null;
+  const start = `${m[1]}-${m[2]}-01`;
+  const lastDay = new Date(y, mo, 0).getDate();
+  const end = `${m[1]}-${m[2]}-${String(lastDay).padStart(2, "0")}`;
+  return { start, end };
+}
+
 export default function SalesReportPage() {
-  const [index, setIndex] = useState<OrdersImportSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [startDate, setStartDate] = useState<string>("");
-  const [endDate, setEndDate] = useState<string>("");
-  const [compiledTotals, setCompiledTotals] = useState<{ package: number; subscription: number; repurchase: number }>({
-    package: 0,
-    subscription: 0,
-    repurchase: 0,
-  });
+  const [settings, setSettings] = useState<AdminSettings | null>(null);
+  const [month, setMonth] = useState<string>("");
+  const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -26,20 +41,15 @@ export default function SalesReportPage() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch("/api/admin/orders", { cache: "no-store" });
-        const json = (await res.json()) as { index?: OrdersImportSummary[]; error?: string };
-        if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
-        if (!cancelled) setIndex(json.index ?? []);
-
         const today = new Date();
         const y = today.getFullYear();
         const m = String(today.getMonth() + 1).padStart(2, "0");
-        const d = String(today.getDate()).padStart(2, "0");
-        const iso = `${y}-${m}-${d}`;
-        if (!cancelled) {
-          setStartDate(iso);
-          setEndDate(iso);
-        }
+        const mm = `${y}-${m}`;
+        const sRes = await fetch("/api/admin/settings", { cache: "no-store" });
+        const sJson = (await sRes.json()) as { settings?: AdminSettings; error?: string };
+        if (!sRes.ok) throw new Error(sJson.error ?? `Failed with status ${sRes.status}`);
+        if (!cancelled) setSettings(sJson.settings ?? null);
+        if (!cancelled) setMonth(mm);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -54,59 +64,142 @@ export default function SalesReportPage() {
 
   useEffect(() => {
     let cancelled = false;
-    async function loadCompiled() {
-      if (!startDate || !endDate) return;
+    async function loadCompiledForMonth() {
+      const range = monthToRange(month);
+      if (!range) return;
       setLoading(true);
       setError(null);
       try {
-        const start = startDate <= endDate ? startDate : endDate;
-        const end = startDate <= endDate ? endDate : startDate;
-        const res = await fetch(`/api/admin/orders/compiled?start=${start}&end=${end}`, { cache: "no-store" });
+        const res = await fetch(`/api/admin/orders/compiled?start=${range.start}&end=${range.end}`, { cache: "no-store" });
         const json = (await res.json()) as { rows?: Array<Record<string, unknown>>; error?: string };
         if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
-        let p = 0;
-        let s = 0;
-        let r = 0;
-        for (const row of json.rows ?? []) {
-          const status = String(row["status"] ?? "");
-          if (isOrderExcludedFromSuccessMetrics(status)) continue;
-          const pkg = row["packageProducts"] as ProductBreakdown | undefined;
-          const sub = row["subscriptionProducts"] as ProductBreakdown | undefined;
-          const rep = row["repurchaseProducts"] as ProductBreakdown | undefined;
-          const subCount = Number(row["subscriptionsCount"]) || 0;
-          const pkgPriceRaw = row["packagePrice"];
-          const pkgPrice =
-            typeof pkgPriceRaw === "number" && Number.isFinite(pkgPriceRaw)
-              ? pkgPriceRaw
-              : typeof pkgPriceRaw === "string"
-                ? Number(pkgPriceRaw.replace(/,/g, "")) || 0
-                : 0;
-          const pkgPieces = sumBreakdown(pkg ?? ({} as ProductBreakdown));
-          const subPieces = sumBreakdown(sub ?? ({} as ProductBreakdown));
-          const repPieces = sumBreakdown(rep ?? ({} as ProductBreakdown));
-          if (pkgPieces > 0 || pkgPrice > 0) p++;
-          if (subCount > 0 || subPieces > 0) s++;
-          if (repPieces > 0) r++;
-        }
-        if (!cancelled) setCompiledTotals({ package: p, subscription: s, repurchase: r });
+        if (cancelled) return;
+        setRows(json.rows ?? []);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
-    loadCompiled();
+    void loadCompiledForMonth();
     return () => {
       cancelled = true;
     };
-  }, [startDate, endDate]);
+  }, [month]);
 
-  const totals = useMemo(() => {
-    const p = compiledTotals.package;
-    const s = compiledTotals.subscription;
-    const r = compiledTotals.repurchase;
-    return { p, s, r, all: p + s + r };
-  }, [compiledTotals]);
+  const productPriceByName = useMemo(() => {
+    const map = new Map<string, { srp: number; membersPrice: number }>();
+    for (const p of settings?.products ?? []) map.set(p.name, { srp: p.srp ?? 0, membersPrice: p.membersPrice ?? 0 });
+    return map;
+  }, [settings]);
+
+  type DailyRow = {
+    date: string;
+    packageAmount: number;
+    subscriptionAmount: number;
+    deliveryFee: number;
+    repurchaseTotal: number;
+    repurchaseByProduct: Record<string, number>;
+  };
+
+  const daily = useMemo(() => {
+    const out = new Map<string, DailyRow>();
+    const products = (settings?.products ?? []).map((p) => p.name);
+
+    const add = (d: string): DailyRow => {
+      const existing = out.get(d);
+      if (existing) return existing;
+      const base: DailyRow = {
+        date: d,
+        packageAmount: 0,
+        subscriptionAmount: 0,
+        deliveryFee: 0,
+        repurchaseTotal: 0,
+        repurchaseByProduct: Object.fromEntries(products.map((p) => [p, 0])),
+      };
+      out.set(d, base);
+      return base;
+    };
+
+    const num = (v: unknown): number => {
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+      if (typeof v === "string") {
+        const n = Number(v.replace(/,/g, "").trim());
+        return Number.isFinite(n) ? n : 0;
+      }
+      return 0;
+    };
+
+    for (const row of rows) {
+      const status = String(row["status"] ?? "");
+      if (isOrderExcludedFromSuccessMetrics(status)) continue;
+      const day = String(row["date"] ?? "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+      const dr = add(day);
+
+      const memberType = String(row["memberType"] ?? "").toLowerCase();
+      const isMember = memberType.includes("member") && !memberType.includes("non");
+
+      const packagePrice = num(row["packagePrice"]);
+      const deliveryFee = num(row["deliveryFee"]);
+      const merchantFee = num(row["merchantFee"]);
+      const totalAmount = num(row["totalAmount"]);
+
+      dr.deliveryFee += deliveryFee;
+
+      // Repurchase amount by product using SRP (member pricing is usually for packages/subscriptions).
+      const rep = row["repurchaseProducts"] as ProductBreakdown | undefined;
+      let repurchaseAmt = 0;
+      if (rep && typeof rep === "object") {
+        for (const [name, qtyRaw] of Object.entries(rep)) {
+          const qty = Number(qtyRaw) || 0;
+          if (qty <= 0) continue;
+          const price = productPriceByName.get(name)?.srp ?? 0;
+          const amt = qty * price;
+          repurchaseAmt += amt;
+          dr.repurchaseByProduct[name] = (dr.repurchaseByProduct[name] ?? 0) + amt;
+        }
+      }
+      dr.repurchaseTotal += repurchaseAmt;
+
+      // Package revenue: use packagePrice when present.
+      if (packagePrice > 0) dr.packageAmount += packagePrice;
+
+      // Subscription amount: prefer product breakdown * price; otherwise use residual from total.
+      const sub = row["subscriptionProducts"] as ProductBreakdown | undefined;
+      let subAmt = 0;
+      if (sub && typeof sub === "object") {
+        for (const [name, qtyRaw] of Object.entries(sub)) {
+          const qty = Number(qtyRaw) || 0;
+          if (qty <= 0) continue;
+          const p = productPriceByName.get(name);
+          const price = isMember ? (p?.membersPrice ?? 0) : (p?.srp ?? 0);
+          subAmt += qty * price;
+        }
+      }
+      if (subAmt <= 0) {
+        const residual = totalAmount - deliveryFee - merchantFee - packagePrice - repurchaseAmt;
+        if (residual > 0) subAmt = residual;
+      }
+      dr.subscriptionAmount += subAmt;
+    }
+
+    return Array.from(out.values()).sort((a, b) => b.date.localeCompare(a.date));
+  }, [rows, settings, productPriceByName]);
+
+  const monthTotals = useMemo(() => {
+    let pkg = 0;
+    let sub = 0;
+    let rep = 0;
+    let df = 0;
+    for (const d of daily) {
+      pkg += d.packageAmount;
+      sub += d.subscriptionAmount;
+      rep += d.repurchaseTotal;
+      df += d.deliveryFee;
+    }
+    return { pkg, sub, rep, df, all: pkg + sub + rep + df };
+  }, [daily]);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_420px]">
@@ -116,20 +209,11 @@ export default function SalesReportPage() {
 
         <div className="mt-4 flex flex-wrap items-end gap-3">
           <div>
-            <div className="text-xs font-semibold text-zinc-400">Start date</div>
+            <div className="text-xs font-semibold text-zinc-400">Month</div>
             <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="mt-1 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500/60"
-            />
-          </div>
-          <div>
-            <div className="text-xs font-semibold text-zinc-400">End date</div>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
+              type="month"
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
               className="mt-1 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500/60"
             />
           </div>
@@ -142,56 +226,74 @@ export default function SalesReportPage() {
           </div>
         ) : null}
 
-        <div className="mt-6 grid gap-3 sm:grid-cols-4">
+        <div className="mt-6 grid gap-3 sm:grid-cols-5">
           <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-            <div className="text-xs font-semibold text-zinc-400">All (P+S+R counts)</div>
-            <div className="mt-1 text-lg font-bold text-white">{countFmt(totals.all)}</div>
+            <div className="text-xs font-semibold text-zinc-400">All (PHP)</div>
+            <div className="mt-1 text-lg font-bold text-white">{currency(monthTotals.all)}</div>
           </div>
           <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-            <div className="text-xs font-semibold text-zinc-400">Package orders</div>
-            <div className="mt-1 text-lg font-bold text-white">{countFmt(totals.p)}</div>
+            <div className="text-xs font-semibold text-zinc-400">Package (PHP)</div>
+            <div className="mt-1 text-lg font-bold text-white">{currency(monthTotals.pkg)}</div>
           </div>
           <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-            <div className="text-xs font-semibold text-zinc-400">Subscription orders</div>
-            <div className="mt-1 text-lg font-bold text-white">{countFmt(totals.s)}</div>
+            <div className="text-xs font-semibold text-zinc-400">Subscription (PHP)</div>
+            <div className="mt-1 text-lg font-bold text-white">{currency(monthTotals.sub)}</div>
           </div>
           <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-            <div className="text-xs font-semibold text-zinc-400">Repurchase orders</div>
-            <div className="mt-1 text-lg font-bold text-white">{countFmt(totals.r)}</div>
+            <div className="text-xs font-semibold text-zinc-400">Repurchase (PHP)</div>
+            <div className="mt-1 text-lg font-bold text-white">{currency(monthTotals.rep)}</div>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+            <div className="text-xs font-semibold text-zinc-400">Delivery fee (PHP)</div>
+            <div className="mt-1 text-lg font-bold text-white">{currency(monthTotals.df)}</div>
           </div>
         </div>
 
         <div className="mt-6">
-          <div className="text-sm font-semibold">Daily totals</div>
-          <div className="mt-1 text-xs text-zinc-400">Latest first</div>
+          <div className="text-sm font-semibold">Daily totals (by effective date)</div>
+          <div className="mt-1 text-xs text-zinc-400">Default: current month</div>
 
-          <div className="mt-4 space-y-2">
-            {index.length === 0 ? (
-              <div className="text-sm text-zinc-300">No imports yet. Upload a file in Import Orders.</div>
-            ) : (
-              index.map((i) => (
-                <div key={i.date} className="rounded-2xl border border-white/10 bg-black/20 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm font-bold text-white">{i.date}</div>
-                      <div className="mt-1 truncate text-xs text-zinc-400">{i.filename}</div>
-                    </div>
-                    <div className="text-xs text-zinc-400">{i.totalRows} rows</div>
-                  </div>
-                    <div className="mt-3 grid gap-2 sm:grid-cols-3 text-xs">
-                    <div className="rounded-xl border border-white/10 bg-white/5 px-2 py-1 text-zinc-200">
-                      Package: <span className="font-semibold text-white">{countFmt(i.totals.package)}</span>
-                    </div>
-                    <div className="rounded-xl border border-white/10 bg-white/5 px-2 py-1 text-zinc-200">
-                      Subscription: <span className="font-semibold text-white">{countFmt(i.totals.subscription)}</span>
-                    </div>
-                    <div className="rounded-xl border border-white/10 bg-white/5 px-2 py-1 text-zinc-200">
-                      Repurchase: <span className="font-semibold text-white">{countFmt(i.totals.repurchase)}</span>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
+          <div className="admin-table-wrap mt-3 overflow-auto">
+            <table className="min-w-[860px] text-xs">
+              <thead className="bg-black/30 text-zinc-300">
+                <tr>
+                  <th className="px-3 py-2 text-left">Date</th>
+                  <th className="px-3 py-2 text-right whitespace-nowrap">Package</th>
+                  <th className="px-3 py-2 text-right whitespace-nowrap">Subscription</th>
+                  <th className="px-3 py-2 text-right whitespace-nowrap">Repurchase total</th>
+                  <th className="px-3 py-2 text-right whitespace-nowrap">Delivery fee</th>
+                  {(settings?.products ?? []).map((p) => (
+                    <th key={p.name} className="px-3 py-2 text-right whitespace-nowrap">
+                      Rep {p.name}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/10">
+                {daily.length === 0 ? (
+                  <tr>
+                    <td className="px-3 py-4 text-zinc-500" colSpan={5 + (settings?.products?.length ?? 0)}>
+                      No successful orders found for this month.
+                    </td>
+                  </tr>
+                ) : (
+                  daily.map((d) => (
+                    <tr key={d.date} className="bg-black/10 text-zinc-100">
+                      <td className="px-3 py-2 whitespace-nowrap font-semibold text-zinc-200">{d.date}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{currency(d.packageAmount)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{currency(d.subscriptionAmount)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{currency(d.repurchaseTotal)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{currency(d.deliveryFee)}</td>
+                      {(settings?.products ?? []).map((p) => (
+                        <td key={`${d.date}-${p.name}`} className="px-3 py-2 text-right tabular-nums text-zinc-300">
+                          {currency(d.repurchaseByProduct[p.name] ?? 0)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -199,9 +301,15 @@ export default function SalesReportPage() {
       <div className="admin-card">
         <div className="text-sm font-semibold">How it’s computed</div>
         <div className="mt-2 space-y-2 text-sm text-zinc-200">
-          <div>Package / Subscription / Repurchase totals count successful orders (not pending, processing, or cancelled) that have that line type.</div>
+          <div>
+            Rows use successful orders only (not pending, processing, or cancelled) from the compiled orders endpoint.
+          </div>
           <div className="text-xs text-zinc-400">
-            Product columns in the detailed tables are still quantities (pieces). The summary numbers are order counts, not piece totals.
+            Package uses `packagePrice`. Repurchase uses SRP × qty by product. Subscription prefers product breakdown
+            pricing (member vs SRP) and falls back to the order&apos;s residual `totalAmount` when needed.
+          </div>
+          <div className="text-xs text-zinc-400">
+            Repurchase product columns are amounts (PHP), not piece totals.
           </div>
         </div>
       </div>

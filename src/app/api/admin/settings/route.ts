@@ -12,6 +12,7 @@ type SettingsBody = {
   pettyCashCategories?: unknown;
   packages?: unknown;
   products?: unknown;
+  allowSuperadminEditEncodedInventory?: unknown;
 };
 
 function normalizeList(v: unknown): string[] {
@@ -91,12 +92,17 @@ export async function POST(req: Request) {
     body.pettyCashCategories === undefined ? current.pettyCashCategories : normalizeList(body.pettyCashCategories);
   const packages = body.packages === undefined ? current.packages : normalizePackages(body.packages);
   const products = body.products === undefined ? current.products : normalizeProducts(body.products);
+  const allowSuperadminEditEncodedInventory =
+    body.allowSuperadminEditEncodedInventory === undefined
+      ? current.allowSuperadminEditEncodedInventory ?? false
+      : Boolean(body.allowSuperadminEditEncodedInventory);
 
   const next: AdminSettings = {
     expenseCategories: expenseCategories.length ? expenseCategories : current.expenseCategories,
     pettyCashCategories: pettyCashCategories.length ? pettyCashCategories : current.pettyCashCategories,
     packages: packages.length ? packages : current.packages,
     products: products.length ? products : current.products,
+    allowSuperadminEditEncodedInventory,
     updatedAt: new Date().toISOString(),
   };
 

@@ -37,7 +37,11 @@ export default function SettingsPage() {
     load();
   }, []);
 
-  const save = async (next: { expenseCategories?: string[]; pettyCashCategories?: string[] }) => {
+  const save = async (next: {
+    expenseCategories?: string[];
+    pettyCashCategories?: string[];
+    allowSuperadminEditEncodedInventory?: boolean;
+  }) => {
     setSaving(true);
     setError(null);
     try {
@@ -101,6 +105,37 @@ export default function SettingsPage() {
         ) : null}
 
         <div className="mt-6 grid gap-6">
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold">Access powers</div>
+                <div className="mt-1 text-xs text-zinc-400">
+                  Controls one-time overrides that only superadmins can use.
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3">
+              <label className="flex items-start gap-2 text-xs text-zinc-300">
+                <input
+                  type="checkbox"
+                  checked={Boolean(settings?.allowSuperadminEditEncodedInventory)}
+                  onChange={(e) =>
+                    void save({ allowSuperadminEditEncodedInventory: e.target.checked })
+                  }
+                  disabled={saving}
+                  className="mt-0.5 rounded border-white/20"
+                />
+                <span>
+                  Allow superadmin to edit <strong>encoded ending inventory</strong>
+                </span>
+              </label>
+              <div className="mt-1 text-[10px] leading-snug text-zinc-500">
+                When enabled: superadmin can modify a day&apos;s ending counts even after staff encoded it. When disabled:
+                encoded ending inventory becomes read-only for everyone.
+              </div>
+            </div>
+          </div>
           <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
