@@ -1,7 +1,7 @@
 import { mergeOrderRowWithAdjustment } from "@/data/admin/orderAdjustmentMerge";
 import { lookupInvoiceParsedRow } from "@/data/admin/orderInvoiceLookup";
 import { readOrdersDayAsync } from "@/data/admin/orders";
-import { getClaimCalendarYmd, isOrderClaimedForInventory, isPickupDelivery } from "@/data/admin/orderClaim";
+import { getClaimCalendarYmd, isOrderClaimedForInventory } from "@/data/admin/orderClaim";
 import type { OrderClaimsMap } from "@/data/admin/orderClaim";
 import { loadOrderAdjustments, loadOrderClaims, loadOrdersIndex } from "@/data/admin/storage";
 
@@ -129,7 +129,9 @@ export async function computeClaimedOutTotalsForRange(start: string, end: string
       const adj = adjustments[invoiceNumber];
       const merged = mergeOrderRowWithAdjustment(rec as Record<string, unknown>, adj);
       const effectiveDate = adj?.effectiveDate ?? sourceDate;
-      if (effectiveDate < start || effectiveDate > end) continue;
+      const claimYmd = getClaimCalendarYmd(invoiceNumber, claims as OrderClaimsMap);
+      const inventoryDay = claimYmd ?? effectiveDate;
+      if (inventoryDay < start || inventoryDay > end) continue;
 
       const status = adj?.status ?? (typeof merged["status"] === "string" ? (merged["status"] as string) : "");
       const deliveryMethod =
@@ -162,8 +164,8 @@ export async function computeClaimedOutTotalsForRange(start: string, end: string
     }
   }
 
-  // Pick-up orders can be claimed on a later day than their import day.
-  // Inventory "Out" for a selected day should include pick-up orders whose CLAIM DAY is in [start, end],
+  // Orders can be claimed on a later day than their import day.
+  // Inventory "Out" for a selected day should include orders whose CLAIM DAY is in [start, end],
   // even if the source sheet date is outside the window.
   const claimEntries = Object.entries(claims as OrderClaimsMap);
   for (const [invoiceNumber] of claimEntries) {
@@ -179,7 +181,6 @@ export async function computeClaimedOutTotalsForRange(start: string, end: string
     const status = adj?.status ?? (typeof merged["status"] === "string" ? (merged["status"] as string) : "");
     const deliveryMethod =
       typeof merged["deliveryMethod"] === "string" ? (merged["deliveryMethod"] as string).trim() : "";
-    if (!isPickupDelivery(deliveryMethod)) continue;
 
     if (
       !isOrderClaimedForInventory({
@@ -269,7 +270,9 @@ export async function computeClaimedOutDetailsForRange(
       const adj = adjustments[invoiceNumber];
       const merged = mergeOrderRowWithAdjustment(rec as Record<string, unknown>, adj);
       const effectiveDate = adj?.effectiveDate ?? sourceDate;
-      if (effectiveDate < start || effectiveDate > end) continue;
+      const claimYmd = getClaimCalendarYmd(invoiceNumber, claims as OrderClaimsMap);
+      const inventoryDay = claimYmd ?? effectiveDate;
+      if (inventoryDay < start || inventoryDay > end) continue;
 
       const status = adj?.status ?? (typeof merged["status"] === "string" ? (merged["status"] as string) : "");
       const deliveryMethod =
@@ -310,7 +313,7 @@ export async function computeClaimedOutDetailsForRange(
 
       out.push({
         invoiceNumber,
-        effectiveDate,
+        effectiveDate: inventoryDay,
         sourceDate,
         distributorName: distributorName || "—",
         lines,
@@ -319,7 +322,7 @@ export async function computeClaimedOutDetailsForRange(
     }
   }
 
-  // Also include pick-up orders whose CLAIM DAY is within the window (even if imported earlier).
+  // Also include orders whose CLAIM DAY is within the window (even if imported earlier).
   const claimEntries = Object.entries(claims as OrderClaimsMap);
   for (const [invoiceNumber] of claimEntries) {
     if (seenInvoices.has(invoiceNumber)) continue;
@@ -334,7 +337,6 @@ export async function computeClaimedOutDetailsForRange(
     const status = adj?.status ?? (typeof merged["status"] === "string" ? (merged["status"] as string) : "");
     const deliveryMethod =
       typeof merged["deliveryMethod"] === "string" ? (merged["deliveryMethod"] as string).trim() : "";
-    if (!isPickupDelivery(deliveryMethod)) continue;
 
     if (
       !isOrderClaimedForInventory({
