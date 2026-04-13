@@ -4,6 +4,7 @@ import {
   syncAutoPickupClaimsFromCompiledRows,
 } from "@/data/admin/autoPickupClaim";
 import { mergeOrderRowWithAdjustment } from "@/data/admin/orderAdjustmentMerge";
+import { getClaimCalendarYmd, isNonPickupDelivery } from "@/data/admin/orderClaim";
 import { resolvePackageNameFromPrice } from "@/data/admin/packageResolve";
 import { readOrdersDayAsync } from "@/data/admin/orders";
 import { loadAdminSettings, loadOrderAdjustments, loadOrderClaims, loadOrdersIndex } from "@/data/admin/storage";
@@ -55,6 +56,10 @@ export async function GET(req: Request) {
   const start = startRaw <= endRaw ? startRaw : endRaw;
   const end = startRaw <= endRaw ? endRaw : startRaw;
 
+  /** Delivery schedule: include paid non–pick-up rows whose claim calendar day is in range, even if import/effective day is not. */
+  const scheduleByClaim =
+    url.searchParams.get("scheduleByClaim") === "1" || url.searchParams.get("scheduleByClaim") === "true";
+
   const index = loadOrdersIndex();
   const adjustments = loadOrderAdjustments();
   const packages = loadAdminSettings().packages;
@@ -63,11 +68,13 @@ export async function GET(req: Request) {
     .map((i) => i.date)
     .sort((a, b) => b.localeCompare(a));
 
-  /** Import files whose day key falls in the requested range (ISO strings sort correctly). */
-  const datesInRange = dates.filter((d) => d >= start && d <= end);
+  /** Import files to read: normally only days in [start,end]; for claim schedule, all indexed days so older imports can match by claim date. */
+  const datesToRead = scheduleByClaim ? dates : dates.filter((d) => d >= start && d <= end);
+
+  const claimsForScheduleFilter = scheduleByClaim ? loadOrderClaims() : null;
 
   const dayPayloads = await Promise.all(
-    datesInRange.map(async (sourceDate) => {
+    datesToRead.map(async (sourceDate) => {
       const dayUnknown = await readOrdersDayAsync(sourceDate);
       return { sourceDate, dayUnknown };
     })
@@ -96,10 +103,22 @@ export async function GET(req: Request) {
       const adj = adjustments[invoiceNumber];
       const mergedRec = mergeOrderRowWithAdjustment(rec as Record<string, unknown>, adj);
       const effectiveDate = adj?.effectiveDate ?? sourceDate;
-      if (effectiveDate < start || effectiveDate > end) continue;
-
       const status = adj?.status ?? (typeof mergedRec["status"] === "string" ? (mergedRec["status"] as string) : "");
       const isPaid = paidFromStatus(status);
+      const dmStr =
+        typeof mergedRec["deliveryMethod"] === "string" ? mergedRec["deliveryMethod"].trim() : "";
+
+      if (!scheduleByClaim) {
+        if (effectiveDate < start || effectiveDate > end) continue;
+      } else {
+        const inEffectiveWindow = effectiveDate >= start && effectiveDate <= end;
+        let inClaimScheduleWindow = false;
+        if (isPaid && isNonPickupDelivery(dmStr) && claimsForScheduleFilter) {
+          const claimDay = getClaimCalendarYmd(invoiceNumber, claimsForScheduleFilter) ?? effectiveDate;
+          inClaimScheduleWindow = claimDay >= start && claimDay <= end;
+        }
+        if (!inEffectiveWindow && !inClaimScheduleWindow) continue;
+      }
 
       const packageNameRaw =
         typeof mergedRec["packageName"] === "string" ? (mergedRec["packageName"] as string).trim() : "";

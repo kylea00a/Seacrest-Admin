@@ -122,7 +122,10 @@ export default function DeliveryPage() {
     try {
       const start = startDate <= endDate ? startDate : endDate;
       const end = startDate <= endDate ? endDate : startDate;
-      const res = await fetch(`/api/admin/orders/compiled?start=${start}&end=${end}`, { cache: "no-store" });
+      const res = await fetch(
+        `/api/admin/orders/compiled?start=${start}&end=${end}&scheduleByClaim=1`,
+        { cache: "no-store" },
+      );
       const json = (await res.json()) as { rows?: CompiledRow[]; error?: string };
       if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
       const raw = (json.rows ?? []).filter((r) => isPaidDeliveryOrder(r as DeliveryRowLike));
@@ -214,8 +217,10 @@ export default function DeliveryPage() {
         <div>
           <h1 className="admin-title">Delivery</h1>
           <p className="admin-muted max-w-2xl">
-            Paid <span className="text-zinc-300">For Delivery</span> orders only. Rows with the same receiver, contact
-            #, and shipping address are combined; distributors are listed together. Set courier in All Orders → Edit
+            Paid <span className="text-zinc-300">For Delivery</span> orders only. The date range matches each
+            order&apos;s <span className="text-zinc-300">claim calendar day</span> (same as All Orders → Claim date), not
+            only the import sheet day — so an order imported earlier but claimed on the selected day appears here. Rows
+            with the same receiver, contact #, and shipping address are combined. Set courier in All Orders → Edit
             (blank, J&amp;T, International). Pick-up + paid + address auto-claims for inventory.
           </p>
         </div>
