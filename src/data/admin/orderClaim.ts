@@ -19,7 +19,10 @@ export function paidFromStatusText(status: string): boolean {
   return false;
 }
 
-export type OrderClaimsMap = Record<string, { claimedAt: string; claimDate?: string }>;
+export type OrderClaimsMap = Record<
+  string,
+  { claimedAt: string; claimDate?: string; claimDateExplicit?: boolean }
+>;
 
 export function isOrderClaimedForInventory(args: {
   deliveryMethod: string;
@@ -60,13 +63,34 @@ export function isSameLocalCalendarDay(
   return d === calendarYmdInTimeZone(now, timeZone);
 }
 
-/** Claim calendar day for display (prefers stored `claimDate`, else Manila date from `claimedAt`). */
+/**
+ * Claim calendar day for display and same-day rules.
+ *
+ * - If `claimDateExplicit` (set from New Edit), stored `claimDate` is authoritative.
+ * - Otherwise, auto-sync can leave `claimDate` on an older day than `claimedAt` (e.g. first compile
+ *   day vs when the order was actually claimed). In that case use the Manila day of `claimedAt`
+ *   when it is **after** `claimDate`.
+ * - If only one of `claimDate` / `claimedAt` is usable, use it.
+ */
 export function getClaimCalendarYmd(invoiceNumber: string, claims: OrderClaimsMap): string | null {
   const rec = claims[invoiceNumber];
   if (!rec) return null;
+
+  const claimedAtYmd = rec.claimedAt
+    ? calendarYmdInTimeZone(new Date(rec.claimedAt), "Asia/Manila")
+    : null;
+
   const raw = rec.claimDate?.trim();
-  if (raw && /^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  if (rec.claimedAt) return calendarYmdInTimeZone(new Date(rec.claimedAt), "Asia/Manila");
+  const claimDateYmd = raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+
+  if (rec.claimDateExplicit && claimDateYmd) return claimDateYmd;
+
+  if (claimDateYmd && claimedAtYmd) {
+    if (claimDateYmd < claimedAtYmd) return claimedAtYmd;
+    return claimDateYmd;
+  }
+  if (claimDateYmd) return claimDateYmd;
+  if (claimedAtYmd) return claimedAtYmd;
   return null;
 }
 

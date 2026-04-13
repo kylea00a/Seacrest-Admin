@@ -109,6 +109,11 @@ export interface OrderClaimRecord {
   claimedAt: string; // ISO
   /** Calendar claim day (Asia/Manila), YYYY-MM-DD — shown as Claim Date; editable via New Edit. */
   claimDate?: string;
+  /**
+   * When true, `claimDate` was saved from New Edit and must win over heuristics that reconcile
+   * stale auto-sync `claimDate` with `claimedAt` (e.g. backdating).
+   */
+  claimDateExplicit?: boolean;
 }
 
 /** Stock received (supply in) for inventory. */

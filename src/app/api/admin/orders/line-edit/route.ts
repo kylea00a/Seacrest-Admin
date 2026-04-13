@@ -210,6 +210,7 @@ export async function POST(req: Request) {
     claims[invoiceNumber] = {
       claimedAt: prev?.claimedAt ?? new Date().toISOString(),
       claimDate: incomingClaimYmd,
+      claimDateExplicit: true,
     };
     saveOrderClaims(claims);
   }
