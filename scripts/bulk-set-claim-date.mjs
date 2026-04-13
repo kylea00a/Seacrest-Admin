@@ -2,7 +2,11 @@
  * One-off data migration: set claimDate (and claimDateExplicit) for paid pick-up + delivery
  * claim rows. Does not change application logic — only `data/admin/orderClaims.json`.
  *
- * Usage: node scripts/bulk-set-claim-date.mjs [YYYY-MM-DD]
+ * Usage:
+ *   node scripts/bulk-set-claim-date.mjs [YYYY-MM-DD] [excludeSourceDate]
+ *
+ * - excludeSourceDate: YYYY-MM-DD import file date to skip (e.g. today's upload day).
+ *   If omitted, defaults to the latest `ordersIndex.json[0].date` (when present).
  * Default target day: 2026-04-10
  */
 import fs from "fs";
@@ -94,9 +98,14 @@ function main() {
   const claims = readJson(CLAIMS_FILE);
   const adjustments = readJsonOrEmptyObject(ADJ_FILE);
   const index = readJson(INDEX_FILE);
+  const latestIndexDate =
+    Array.isArray(index) && index[0] && typeof index[0].date === "string" ? index[0].date.trim() : "";
+  const excludeSourceDateArg =
+    process.argv[3] && /^\d{4}-\d{2}-\d{2}$/.test(process.argv[3]) ? process.argv[3] : "";
+  const excludeSourceDate = excludeSourceDateArg || latestIndexDate || "";
   const dates = [...new Set(index.map((i) => i.date))];
 
-  /** @type {Map<string, { status: string; deliveryMethod: string }>} */
+  /** @type {Map<string, { status: string; deliveryMethod: string; sourceDate: string }>} */
   const byInvoice = new Map();
 
   for (const sourceDate of dates) {
@@ -122,11 +131,12 @@ function main() {
       const merged = mergeOrderRowWithAdjustment(rec, adj);
       const status = adj?.status ?? (typeof merged.status === "string" ? merged.status : "");
       const deliveryMethod = typeof merged.deliveryMethod === "string" ? merged.deliveryMethod.trim() : "";
-      byInvoice.set(inv, { status, deliveryMethod });
+      byInvoice.set(inv, { status, deliveryMethod, sourceDate });
     }
   }
 
   let updated = 0;
+  let skippedExcludedSourceDate = 0;
   let skippedNotInOrders = 0;
   let skippedUnpaid = 0;
 
@@ -138,6 +148,10 @@ function main() {
     }
     if (!paidFromStatusText(row.status)) {
       skippedUnpaid++;
+      continue;
+    }
+    if (excludeSourceDate && row.sourceDate === excludeSourceDate) {
+      skippedExcludedSourceDate++;
       continue;
     }
     const dm = row.deliveryMethod;
@@ -157,7 +171,9 @@ function main() {
     JSON.stringify(
       {
         targetYmd,
+        excludeSourceDate,
         updated,
+        skippedExcludedSourceDate,
         skippedNotInOrders,
         skippedUnpaid,
         totalClaimKeys: Object.keys(claims).length,
