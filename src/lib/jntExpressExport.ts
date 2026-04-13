@@ -72,6 +72,8 @@ export async function buildJntExpressWorkbookBuffer(rows: JntExportRow[]): Promi
   });
 
   rows.forEach((r, idx) => {
+    // Export-only adjustment: J&T weight should be the computed weight divided by 1.5.
+    const exportWeightKg = Number.isFinite(r.weightKg) ? Number((r.weightKg / 1.5).toFixed(3)) : 0;
     const dataRow = ws.addRow([
       r.receiver,
       formatJntReceiverTelephone(r.telephone),
@@ -81,7 +83,7 @@ export async function buildJntExpressWorkbookBuffer(rows: JntExportRow[]): Promi
       r.region,
       "EZ",
       "Seacrest Package",
-      r.weightKg,
+      exportWeightKg,
       r.totalParcels,
       500,
       0,

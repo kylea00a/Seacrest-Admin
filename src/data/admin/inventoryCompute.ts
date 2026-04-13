@@ -1,6 +1,7 @@
 import { mergeOrderRowWithAdjustment } from "@/data/admin/orderAdjustmentMerge";
+import { lookupInvoiceParsedRow } from "@/data/admin/orderInvoiceLookup";
 import { readOrdersDayAsync } from "@/data/admin/orders";
-import { isOrderClaimedForInventory } from "@/data/admin/orderClaim";
+import { getClaimCalendarYmd, isOrderClaimedForInventory, isPickupDelivery } from "@/data/admin/orderClaim";
 import type { OrderClaimsMap } from "@/data/admin/orderClaim";
 import { loadOrderAdjustments, loadOrderClaims, loadOrdersIndex } from "@/data/admin/storage";
 
@@ -90,6 +91,7 @@ export async function computeClaimedOutTotalsForRange(start: string, end: string
   const claims = loadOrderClaims();
 
   const out: InventoryOutTotals = {};
+  const seenInvoices = new Set<string>();
 
   const add = (name: string, n: number) => {
     if (!name || !Number.isFinite(n) || n <= 0) return;
@@ -98,7 +100,6 @@ export async function computeClaimedOutTotalsForRange(start: string, end: string
 
   const indexDates = [...new Set(index.map((i) => i.date))];
   const datesToScan = indexDates.filter((d) => d >= start && d <= end);
-  if (datesToScan.length === 0) return out;
 
   const dayPayloads = await Promise.all(
     datesToScan.map(async (sourceDate) => {
@@ -157,7 +158,53 @@ export async function computeClaimedOutTotalsForRange(start: string, end: string
       addRec(merged["packageProducts"]);
       addRec(merged["subscriptionProducts"]);
       addRec(merged["repurchaseProducts"]);
+      seenInvoices.add(invoiceNumber);
     }
+  }
+
+  // Pick-up orders can be claimed on a later day than their import day.
+  // Inventory "Out" for a selected day should include pick-up orders whose CLAIM DAY is in [start, end],
+  // even if the source sheet date is outside the window.
+  const claimEntries = Object.entries(claims as OrderClaimsMap);
+  for (const [invoiceNumber] of claimEntries) {
+    if (seenInvoices.has(invoiceNumber)) continue;
+    const claimYmd = getClaimCalendarYmd(invoiceNumber, claims as OrderClaimsMap);
+    if (!claimYmd || claimYmd < start || claimYmd > end) continue;
+
+    const found = await lookupInvoiceParsedRow(invoiceNumber);
+    if (!found) continue;
+    const adj = adjustments[invoiceNumber];
+    const merged = mergeOrderRowWithAdjustment(found.rec as Record<string, unknown>, adj);
+
+    const status = adj?.status ?? (typeof merged["status"] === "string" ? (merged["status"] as string) : "");
+    const deliveryMethod =
+      typeof merged["deliveryMethod"] === "string" ? (merged["deliveryMethod"] as string).trim() : "";
+    if (!isPickupDelivery(deliveryMethod)) continue;
+
+    if (
+      !isOrderClaimedForInventory({
+        deliveryMethod,
+        status,
+        invoiceNumber,
+        claims: claims as OrderClaimsMap,
+      })
+    ) {
+      continue;
+    }
+
+    const addRec = (obj: unknown) => {
+      if (!obj || typeof obj !== "object") return;
+      const o = obj as Record<string, unknown>;
+      for (const [k, v] of Object.entries(o)) {
+        const n = typeof v === "number" ? v : Number(v);
+        if (Number.isFinite(n) && n > 0) add(k, n);
+      }
+    };
+
+    addRec(merged["packageProducts"]);
+    addRec(merged["subscriptionProducts"]);
+    addRec(merged["repurchaseProducts"]);
+    seenInvoices.add(invoiceNumber);
   }
 
   return out;
@@ -189,10 +236,10 @@ export async function computeClaimedOutDetailsForRange(
   const claims = loadOrderClaims();
 
   const out: InventoryOutOrderDetail[] = [];
+  const seenInvoices = new Set<string>();
 
   const indexDates = [...new Set(index.map((i) => i.date))];
   const datesToScan = indexDates.filter((d) => d >= start && d <= end);
-  if (datesToScan.length === 0) return out;
 
   const dayPayloads = await Promise.all(
     datesToScan.map(async (sourceDate) => {
@@ -268,7 +315,66 @@ export async function computeClaimedOutDetailsForRange(
         distributorName: distributorName || "—",
         lines,
       });
+      seenInvoices.add(invoiceNumber);
     }
+  }
+
+  // Also include pick-up orders whose CLAIM DAY is within the window (even if imported earlier).
+  const claimEntries = Object.entries(claims as OrderClaimsMap);
+  for (const [invoiceNumber] of claimEntries) {
+    if (seenInvoices.has(invoiceNumber)) continue;
+    const claimYmd = getClaimCalendarYmd(invoiceNumber, claims as OrderClaimsMap);
+    if (!claimYmd || claimYmd < start || claimYmd > end) continue;
+
+    const found = await lookupInvoiceParsedRow(invoiceNumber);
+    if (!found) continue;
+    const adj = adjustments[invoiceNumber];
+    const merged = mergeOrderRowWithAdjustment(found.rec as Record<string, unknown>, adj);
+
+    const status = adj?.status ?? (typeof merged["status"] === "string" ? (merged["status"] as string) : "");
+    const deliveryMethod =
+      typeof merged["deliveryMethod"] === "string" ? (merged["deliveryMethod"] as string).trim() : "";
+    if (!isPickupDelivery(deliveryMethod)) continue;
+
+    if (
+      !isOrderClaimedForInventory({
+        deliveryMethod,
+        status,
+        invoiceNumber,
+        claims: claims as OrderClaimsMap,
+      })
+    ) {
+      continue;
+    }
+
+    const distributorName =
+      typeof merged["distributorName"] === "string" ? (merged["distributorName"] as string).trim() : "";
+    const lines: InventoryOutOrderDetail["lines"] = [];
+
+    const pushMap = (kind: "package" | "subscription" | "repurchase", obj: unknown) => {
+      if (!obj || typeof obj !== "object") return;
+      const o = obj as Record<string, unknown>;
+      for (const [productName, v] of Object.entries(o)) {
+        const n = typeof v === "number" ? v : Number(v);
+        if (!Number.isFinite(n) || n <= 0) continue;
+        lines.push({ kind, productName, qty: n });
+      }
+    };
+
+    pushMap("package", merged["packageProducts"]);
+    pushMap("subscription", merged["subscriptionProducts"]);
+    pushMap("repurchase", merged["repurchaseProducts"]);
+    if (lines.length === 0) continue;
+    lines.sort((a, b) => a.kind.localeCompare(b.kind) || a.productName.localeCompare(b.productName));
+
+    out.push({
+      invoiceNumber,
+      effectiveDate: claimYmd,
+      sourceDate: found.sourceDate,
+      distributorName: distributorName || "—",
+      lines,
+    });
+    seenInvoices.add(invoiceNumber);
   }
 
   out.sort((a, b) => {

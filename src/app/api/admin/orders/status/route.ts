@@ -53,7 +53,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Status already finalized for this invoice." }, { status: 400 });
   }
 
-  const effectiveDate = isTerminalStatus(status) ? todayISO() : sourceDate ?? todayISO();
+  // Keep the original effective date stable (typically the import/source day).
+  // Claim date is tracked separately in order claims; changing status should not rewrite order date.
+  const effectiveDate = existing?.effectiveDate ?? sourceDate ?? todayISO();
 
   map[invoiceNumber] = {
     invoiceNumber,
