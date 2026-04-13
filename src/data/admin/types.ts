@@ -104,9 +104,11 @@ export interface OrdersImportSummary {
   productCounts?: Record<string, { package: number; subscription: number; repurchase: number }>;
 }
 
-/** Pick-up orders: manual claim by invoice (delivery orders are auto-claimed when paid). */
+/** Pick-up: manual claim; delivery: auto-claimed when paid (synced on compile). */
 export interface OrderClaimRecord {
   claimedAt: string; // ISO
+  /** Calendar claim day (Asia/Manila), YYYY-MM-DD — shown as Claim Date; editable via New Edit. */
+  claimDate?: string;
 }
 
 /** Stock received (supply in) for inventory. */

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { calendarYmdInTimeZone } from "@/data/admin/orderClaim";
 import { canClaimPickupOrder } from "@/data/admin/orderInvoiceLookup";
 import { loadOrderClaims, saveOrderClaims } from "@/data/admin/storage";
 import { requireApiAnyPermission } from "@/lib/adminApiAuth";
@@ -25,9 +26,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "This order is already claimed." }, { status: 400 });
   }
 
-  const claimedAt = new Date().toISOString();
-  map[invoiceNumber] = { claimedAt };
+  const now = new Date();
+  const claimedAt = now.toISOString();
+  map[invoiceNumber] = {
+    claimedAt,
+    claimDate: calendarYmdInTimeZone(now, "Asia/Manila"),
+  };
   saveOrderClaims(map);
 
-  return NextResponse.json({ ok: true, claimedAt });
+  return NextResponse.json({
+    ok: true,
+    claimedAt,
+    claimDate: map[invoiceNumber].claimDate,
+  });
 }

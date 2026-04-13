@@ -19,7 +19,7 @@ export function paidFromStatusText(status: string): boolean {
   return false;
 }
 
-export type OrderClaimsMap = Record<string, { claimedAt: string }>;
+export type OrderClaimsMap = Record<string, { claimedAt: string; claimDate?: string }>;
 
 export function isOrderClaimedForInventory(args: {
   deliveryMethod: string;
@@ -58,6 +58,32 @@ export function isSameLocalCalendarDay(
   const d = String(dateStr ?? "").trim().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
   return d === calendarYmdInTimeZone(now, timeZone);
+}
+
+/** Claim calendar day for display (prefers stored `claimDate`, else Manila date from `claimedAt`). */
+export function getClaimCalendarYmd(invoiceNumber: string, claims: OrderClaimsMap): string | null {
+  const rec = claims[invoiceNumber];
+  if (!rec) return null;
+  const raw = rec.claimDate?.trim();
+  if (raw && /^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  if (rec.claimedAt) return calendarYmdInTimeZone(new Date(rec.claimedAt), "Asia/Manila");
+  return null;
+}
+
+/**
+ * For **delivery** line-edit “same calendar day” rules, use claim calendar day when present;
+ * pick-up and other cases use the order’s effective date.
+ */
+export function effectiveEditCalendarDay(args: {
+  deliveryMethod: string;
+  orderDateYmd: string;
+  invoiceNumber: string;
+  claims: OrderClaimsMap;
+}): string {
+  const orderDay = String(args.orderDateYmd ?? "").trim().slice(0, 10);
+  if (!isNonPickupDelivery(args.deliveryMethod)) return orderDay;
+  const cd = getClaimCalendarYmd(args.invoiceNumber, args.claims);
+  return cd ?? orderDay;
 }
 
 export function getProductClaimDisplay(args: {

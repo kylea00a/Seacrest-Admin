@@ -8,6 +8,8 @@ import OrdersDateRangePicker from "../_components/OrdersDateRangePicker";
 import { useAdminProductKeys } from "../_components/useAdminProductKeys";
 import { courierBucket } from "@/data/admin/deliveryGrouping";
 import {
+  effectiveEditCalendarDay,
+  getClaimCalendarYmd,
   getProductClaimDisplay,
   isNonPickupDelivery,
   isPickupDelivery,
@@ -148,6 +150,8 @@ function OrderLineEditForm({
   onCancel,
   saving,
   newEditMode,
+  claimDateValue,
+  onClaimDateChange,
 }: {
   productKeys: string[];
   draft: LineEditDraft;
@@ -157,6 +161,9 @@ function OrderLineEditForm({
   saving: boolean;
   /** "New Edit" column: saves bypass claim / same-day locks (requires ordersFullEdit). */
   newEditMode?: boolean;
+  /** YYYY-MM-DD for Asia/Manila claim calendar day (New Edit only). */
+  claimDateValue: string;
+  onClaimDateChange: (v: string) => void;
 }) {
   const inp =
     "mt-0.5 w-full rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500/50";
@@ -196,6 +203,17 @@ function OrderLineEditForm({
           <strong>New Edit</strong> — saving will override the usual claim and same-day locks (for users with
           full order edit access).
         </p>
+      ) : null}
+      {newEditMode ? (
+        <label className="block text-xs text-zinc-400">
+          Claim date (Asia/Manila)
+          <input
+            type="date"
+            value={claimDateValue}
+            onChange={(e) => onClaimDateChange(e.target.value)}
+            className={inp}
+          />
+        </label>
       ) : null}
       <div className="grid gap-4 lg:grid-cols-3">
         {sec("Package products", productGrid("packageProducts"))}
@@ -342,6 +360,8 @@ export default function OrdersPage() {
   /** "New Edit" column: bypasses claim / same-day locks when saving (ordersFullEdit). */
   const [lineEditNewOpen, setLineEditNewOpen] = useState<Record<string, boolean>>({});
   const [lineEditDrafts, setLineEditDrafts] = useState<Record<string, LineEditDraft>>({});
+  /** YYYY-MM-DD — editable in New Edit, sent on save with bypass header. */
+  const [claimDateDrafts, setClaimDateDrafts] = useState<Record<string, string>>({});
   const [savingLineEdit, setSavingLineEdit] = useState<string>("");
 
   const { startDate, endDate } = useMemo(() => {
@@ -414,9 +434,10 @@ export default function OrdersPage() {
     void refetchCompiledRows();
   }, [refetchCompiledRows]);
 
+  /** Reset pagination when filters/range change — not when `rows` refetches (e.g. after saving a line edit). */
   useEffect(() => {
     setTablePage(1);
-  }, [rows, search, statusFilter, rowsPerPage]);
+  }, [search, statusFilter, rowsPerPage, startDate, endDate, index.length]);
 
   const [statusDraft, setStatusDraft] = useState<Record<string, StatusOption>>({});
   const [savingStatus, setSavingStatus] = useState<string>("");
@@ -456,10 +477,19 @@ export default function OrdersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ invoiceNumber }),
       });
-      const json = (await res.json()) as { ok?: boolean; claimedAt?: string; error?: string };
+      const json = (await res.json()) as {
+        ok?: boolean;
+        claimedAt?: string;
+        claimDate?: string;
+        error?: string;
+      };
       if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
       const at = json.claimedAt ?? new Date().toISOString();
-      setClaims((prev) => ({ ...prev, [invoiceNumber]: { claimedAt: at } }));
+      const rec: OrderClaimRecord = { claimedAt: at };
+      if (typeof json.claimDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(json.claimDate)) {
+        rec.claimDate = json.claimDate;
+      }
+      setClaims((prev) => ({ ...prev, [invoiceNumber]: rec }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -472,7 +502,7 @@ export default function OrdersPage() {
     const subCols = subProductsOpen ? productKeys.length : 0;
     const repCols = repProductsOpen ? productKeys.length : 0;
     const shipCols = shippingDetailsOpen ? 8 : 1;
-    return 7 + pkgCols + 1 + subCols + 1 + repCols + 5 + shipCols + 4;
+    return 7 + pkgCols + 1 + subCols + 1 + repCols + 5 + shipCols + 5;
   }, [pkgProductsOpen, subProductsOpen, repProductsOpen, shippingDetailsOpen, productKeys.length]);
 
   const saveLineEdit = async (invoiceNumber: string) => {
@@ -512,19 +542,32 @@ export default function OrdersPage() {
         lineDetails.zipCode = draft.zipCode;
         lineDetails.deliveryCourier = draft.deliveryCourier;
       }
+      const claimDate =
+        newEditBypass && claimDateDrafts[invoiceNumber]?.match(/^\d{4}-\d{2}-\d{2}$/)
+          ? claimDateDrafts[invoiceNumber]
+          : undefined;
       const res = await fetch("/api/admin/orders/line-edit", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...(newEditBypass ? { "x-orders-line-bypass": "1" } : {}),
         },
-        body: JSON.stringify({ invoiceNumber, lineDetails }),
+        body: JSON.stringify({
+          invoiceNumber,
+          lineDetails,
+          ...(claimDate ? { claimDate } : {}),
+        }),
       });
       const json = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
       setLineEditOpen((prev) => ({ ...prev, [invoiceNumber]: false }));
       setLineEditNewOpen((prev) => ({ ...prev, [invoiceNumber]: false }));
       setLineEditDrafts((prev) => {
+        const next = { ...prev };
+        delete next[invoiceNumber];
+        return next;
+      });
+      setClaimDateDrafts((prev) => {
         const next = { ...prev };
         delete next[invoiceNumber];
         return next;
@@ -859,6 +902,9 @@ export default function OrdersPage() {
               <th className="px-3 py-2 text-left" rowSpan={headRowSpan}>
                 Product status
               </th>
+              <th className="px-3 py-2 text-left whitespace-nowrap" rowSpan={headRowSpan}>
+                Claim date
+              </th>
               <th className="px-3 py-2 text-center" rowSpan={headRowSpan}>
                 Edit
               </th>
@@ -903,8 +949,14 @@ export default function OrdersPage() {
               });
               const statusComplete = (r.status ?? "").toLowerCase().includes("complete");
               const dm = r.deliveryMethod ?? "";
-              const sameOrderDay = isSameLocalCalendarDay(r.date);
-              /** Pick-up: hide edit once Claimed. Delivery: hide only after the order calendar day (PH); paid delivery stays "Claimed" in UI but remains editable until end of that day. `ordersFullEdit` gates detail editing. */
+              const editCalendarDay = effectiveEditCalendarDay({
+                deliveryMethod: dm,
+                orderDateYmd: r.date,
+                invoiceNumber: inv,
+                claims,
+              });
+              const sameOrderDay = isSameLocalCalendarDay(editCalendarDay);
+              /** Pick-up: hide edit once Claimed. Delivery: same-day rule uses Claim date (not order sheet day). `ordersFullEdit` gates detail editing. */
               const hideLineEditToggle =
                 !canFullOrderEdit ||
                 claimMode === "na" ||
@@ -1050,6 +1102,11 @@ export default function OrdersPage() {
                         return <span className="text-zinc-500">—</span>;
                       })()}
                     </td>
+                    <td className="px-3 py-2 whitespace-nowrap text-zinc-300" title="Calendar day the order was claimed (Asia/Manila). Delivery auto-claim uses the day rows were synced.">
+                      {claimMode === "unpaid" || claimMode === "na"
+                        ? "—"
+                        : (getClaimCalendarYmd(inv, claims) ?? "—")}
+                    </td>
                     <td className="px-3 py-2 text-center align-top">
                       {hideLineEditToggle ? (
                         <span
@@ -1060,7 +1117,7 @@ export default function OrdersPage() {
                               : isPickupDelivery(dm) && claimMode === "claimed"
                                 ? "Claimed pick-up orders cannot be line-edited."
                                 : isNonPickupDelivery(dm) && !sameOrderDay
-                                  ? "After the order day (PH time), delivery line edits are locked — even if it showed Claimed when it was still the same day."
+                                  ? "After the claim calendar day (PH time), delivery line edits are locked — use New Edit to override if permitted."
                                   : undefined
                           }
                         >
@@ -1077,8 +1134,8 @@ export default function OrdersPage() {
                                 ? "Cannot edit this line"
                                 : isNonPickupDelivery(dm)
                                   ? claimMode === "claimed"
-                                    ? "Claimed delivery: line items stay editable until end of this order day (PH time)."
-                                    : "Edit line items — delivery can be changed only on the order day (PH time)."
+                                    ? "Claimed delivery: line items stay editable until end of the claim calendar day (PH time)."
+                                    : "Edit line items — delivery can be changed only on the claim calendar day (PH time)."
                                   : "Edit package / subscription / repurchase quantities and delivery"
                             }
                             onChange={(e) => {
@@ -1086,6 +1143,11 @@ export default function OrdersPage() {
                               setLineEditOpen((prev) => ({ ...prev, [inv]: on }));
                               if (on) {
                                 setLineEditNewOpen((prev) => ({ ...prev, [inv]: false }));
+                                setClaimDateDrafts((prev) => {
+                                  const n = { ...prev };
+                                  delete n[inv];
+                                  return n;
+                                });
                                 setLineEditDrafts((prev) => ({
                                   ...prev,
                                   [inv]: rowToLineEditDraft(r, productKeys),
@@ -1128,6 +1190,10 @@ export default function OrdersPage() {
                           onClick={() => {
                             setLineEditNewOpen((prev) => ({ ...prev, [inv]: true }));
                             setLineEditOpen((prev) => ({ ...prev, [inv]: false }));
+                            setClaimDateDrafts((prev) => ({
+                              ...prev,
+                              [inv]: getClaimCalendarYmd(inv, claims) ?? "",
+                            }));
                             setLineEditDrafts((prev) => ({
                               ...prev,
                               [inv]: rowToLineEditDraft(r, productKeys),
@@ -1147,6 +1213,10 @@ export default function OrdersPage() {
                           productKeys={productKeys}
                           draft={draft}
                           newEditMode={editNewOn}
+                          claimDateValue={claimDateDrafts[inv] ?? ""}
+                          onClaimDateChange={(v) =>
+                            setClaimDateDrafts((prev) => ({ ...prev, [inv]: v }))
+                          }
                           onChange={(next) =>
                             setLineEditDrafts((prev) => ({ ...prev, [inv]: next }))
                           }
@@ -1155,6 +1225,11 @@ export default function OrdersPage() {
                             setLineEditOpen((prev) => ({ ...prev, [inv]: false }));
                             setLineEditNewOpen((prev) => ({ ...prev, [inv]: false }));
                             setLineEditDrafts((prev) => {
+                              const n = { ...prev };
+                              delete n[inv];
+                              return n;
+                            });
+                            setClaimDateDrafts((prev) => {
                               const n = { ...prev };
                               delete n[inv];
                               return n;

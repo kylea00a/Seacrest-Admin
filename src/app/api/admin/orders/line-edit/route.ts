@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { applyLineDetailsToRow, mergeOrderRowWithAdjustment } from "@/data/admin/orderAdjustmentMerge";
 import {
+  getClaimCalendarYmd,
   getProductClaimDisplay,
   isNonPickupDelivery,
   isPickupDelivery,
@@ -11,6 +12,7 @@ import {
   loadOrderAdjustments,
   loadOrderClaims,
   saveOrderAdjustments,
+  saveOrderClaims,
   type OrderAdjustment,
   type OrderLineDetailOverride,
   type OrderStatusAdjustmentValue,
@@ -71,10 +73,16 @@ export async function POST(req: Request) {
   const body = (await req.json()) as {
     invoiceNumber?: unknown;
     lineDetails?: unknown;
+    claimDate?: unknown;
   };
 
   const invoiceNumber = typeof body.invoiceNumber === "string" ? body.invoiceNumber.trim() : "";
   if (!invoiceNumber) return NextResponse.json({ error: "Missing `invoiceNumber`." }, { status: 400 });
+
+  const incomingClaimYmd =
+    typeof body.claimDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.claimDate.trim())
+      ? body.claimDate.trim()
+      : null;
 
   const ldRaw = body.lineDetails;
   if (!ldRaw || typeof ldRaw !== "object") {
@@ -164,14 +172,16 @@ export async function POST(req: Request) {
     req.headers.get("x-orders-line-bypass") === "1" ||
     req.headers.get("x-superadmin-line-edit") === "1";
 
-  // Delivery (incl. paid → UI "Claimed"): editable until end of order calendar day in PH; not blocked by mode === "claimed".
+  // Delivery: same-calendar-day rule uses Claim Date (Asia/Manila), not the import/order sheet day.
   if (!bypassClaimDayLocks) {
     if (isNonPickupDelivery(proposedDm)) {
-      if (!isSameLocalCalendarDay(sourceDay)) {
+      const claimYmd = incomingClaimYmd ?? getClaimCalendarYmd(invoiceNumber, claims);
+      const dayForDeliveryWindow = claimYmd ?? sourceDay;
+      if (!isSameLocalCalendarDay(dayForDeliveryWindow)) {
         return NextResponse.json(
           {
             error:
-              "Delivery line items can only be edited on the order's calendar day (Asia/Manila). The next day they are locked.",
+              "Delivery line items can only be edited on the claim calendar day (Asia/Manila), based on Claim Date. After that day they are locked — use New Edit to override if permitted.",
           },
           { status: 400 },
         );
@@ -194,6 +204,15 @@ export async function POST(req: Request) {
 
   map[invoiceNumber] = next;
   saveOrderAdjustments(map);
+
+  if (bypassClaimDayLocks && incomingClaimYmd) {
+    const prev = claims[invoiceNumber];
+    claims[invoiceNumber] = {
+      claimedAt: prev?.claimedAt ?? new Date().toISOString(),
+      claimDate: incomingClaimYmd,
+    };
+    saveOrderClaims(claims);
+  }
 
   return NextResponse.json({ ok: true, adjustment: map[invoiceNumber] });
 }

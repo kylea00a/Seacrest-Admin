@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { syncAutoPickupClaimsFromCompiledRows } from "@/data/admin/autoPickupClaim";
+import {
+  syncAutoDeliveryClaimsFromCompiledRows,
+  syncAutoPickupClaimsFromCompiledRows,
+} from "@/data/admin/autoPickupClaim";
 import { mergeOrderRowWithAdjustment } from "@/data/admin/orderAdjustmentMerge";
 import { resolvePackageNameFromPrice } from "@/data/admin/packageResolve";
 import { readOrdersDayAsync } from "@/data/admin/orders";
@@ -131,6 +134,7 @@ export async function GET(req: Request) {
   });
 
   syncAutoPickupClaimsFromCompiledRows(rows);
+  syncAutoDeliveryClaimsFromCompiledRows(rows);
   const claims = loadOrderClaims();
 
   return NextResponse.json({ rows, count: rows.length, start, end, claims });
