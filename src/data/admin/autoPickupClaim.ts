@@ -61,13 +61,13 @@ export function syncAutoDeliveryClaimsFromCompiledRows(
     invoiceNumber?: unknown;
     deliveryMethod?: unknown;
     status?: unknown;
+    date?: unknown;
   }>,
 ): void {
   const claims = loadOrderClaims();
   let changed = false;
   const now = new Date();
   const claimedAt = now.toISOString();
-  const claimDate = calendarYmdInTimeZone(now, "Asia/Manila");
 
   for (const row of rows) {
     const inv =
@@ -83,7 +83,11 @@ export function syncAutoDeliveryClaimsFromCompiledRows(
     const status = typeof row.status === "string" ? row.status : "";
     if (!paidFromStatusText(status)) continue;
 
-    claims[inv] = { claimedAt, claimDate };
+    // For delivery orders, keep the claim calendar day stable (the order's effective date),
+    // otherwise old orders would appear as "claimed today" and inflate today's delivery list.
+    const d = typeof row.date === "string" ? row.date.trim().slice(0, 10) : "";
+    const claimDate = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : calendarYmdInTimeZone(now, "Asia/Manila");
+    claims[inv] = { claimedAt, claimDate, claimDateExplicit: true };
     changed = true;
   }
 
