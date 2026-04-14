@@ -4,6 +4,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { format, startOfDay } from "date-fns";
 import InventoryDayPicker from "../_components/InventoryDayPicker";
 
+async function safeReadJson<T>(res: Response): Promise<T> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const snippet = text.slice(0, 140).replace(/\s+/g, " ").trim();
+    throw new Error(`Bad response (${res.status}). Expected JSON but got: ${snippet || "(empty)"}`);
+  }
+}
+
 type Row = {
   productName: string;
   deliveryIn: number;
@@ -75,7 +85,7 @@ export default function InventoryPage() {
     try {
       const qs = new URLSearchParams({ start: startDate, end: endDate });
       const res = await fetch(`/api/admin/inventory?${qs.toString()}`, { cache: "no-store" });
-      const json = (await res.json()) as {
+      const json = await safeReadJson<{
         rows?: Row[];
         entries?: Entry[];
         outDetails?: OutOrderDetail[];
@@ -89,7 +99,7 @@ export default function InventoryPage() {
         start?: string;
         end?: string;
         error?: string;
-      };
+      }>(res);
       if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
       setRows(json.rows ?? []);
       setEntries(json.entries ?? []);

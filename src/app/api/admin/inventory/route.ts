@@ -78,10 +78,20 @@ export async function GET(req: Request) {
   const supply = loadInventorySupply();
   const ending = loadInventoryEnding();
 
-  const [outPeriod, outDetails] = await Promise.all([
-    computeClaimedOutTotalsForRange(start, end),
-    computeClaimedOutDetailsForRange(start, end),
-  ]);
+  let outDetails: Awaited<ReturnType<typeof computeClaimedOutDetailsForRange>> = [];
+  let outPeriod: Record<string, number> = {};
+  if (start === end) {
+    // Single-day inventory should be fast: compute detail once and derive totals from it.
+    outDetails = await computeClaimedOutDetailsForRange(start, end);
+    for (const o of outDetails) {
+      for (const ln of o.lines) outPeriod[ln.productName] = (outPeriod[ln.productName] ?? 0) + ln.qty;
+    }
+  } else {
+    [outPeriod, outDetails] = await Promise.all([
+      computeClaimedOutTotalsForRange(start, end),
+      computeClaimedOutDetailsForRange(start, end),
+    ]);
+  }
   const deliveryInPeriod = sumSupplyByProductInRange(supply.entries, start, end);
 
   const productNames = settings.products.map((p) => p.name);

@@ -99,7 +99,6 @@ export default function SalesReportPage() {
     subscriptionAmount: number;
     deliveryFee: number;
     repurchaseTotal: number;
-    repurchaseByProduct: Record<string, number>;
   };
 
   const daily = useMemo(() => {
@@ -115,7 +114,6 @@ export default function SalesReportPage() {
         subscriptionAmount: 0,
         deliveryFee: 0,
         repurchaseTotal: 0,
-        repurchaseByProduct: Object.fromEntries(products.map((p) => [p, 0])),
       };
       out.set(d, base);
       return base;
@@ -147,15 +145,15 @@ export default function SalesReportPage() {
 
       dr.deliveryFee += deliveryFee;
 
-      // Repurchase amount by product using SRP, except chips have bulk member pricing tiers.
+      // Repurchase amount using SRP, except chips have bulk pricing tiers (based on total chips qty per order).
       const rep = row["repurchaseProducts"] as ProductBreakdown | undefined;
       let repurchaseAmt = 0;
       if (rep && typeof rep === "object") {
-        // Chips bulk pricing (members): tier is based on total chips qty across flavors on THIS order.
+        // Chips bulk pricing: tier is based on total chips qty across flavors on THIS order.
         const chipsKeys = Object.keys(rep).filter((k) => k.toLowerCase().includes("chips"));
         const chipsQty = chipsKeys.reduce((acc, k) => acc + (Number((rep as Record<string, unknown>)[k]) || 0), 0);
         const chipsTierPrice =
-          !isMember || chipsQty <= 0
+          chipsQty <= 0
             ? null
             : chipsQty >= 50
               ? 99
@@ -175,7 +173,6 @@ export default function SalesReportPage() {
               : (productPriceByName.get(name)?.srp ?? 0);
           const amt = qty * price;
           repurchaseAmt += amt;
-          dr.repurchaseByProduct[name] = (dr.repurchaseByProduct[name] ?? 0) + amt;
         }
       }
       dr.repurchaseTotal += repurchaseAmt;
@@ -271,17 +268,12 @@ export default function SalesReportPage() {
                   <th className="px-3 py-2 text-right whitespace-nowrap">Subscription</th>
                   <th className="px-3 py-2 text-right whitespace-nowrap">Repurchase total</th>
                   <th className="px-3 py-2 text-right whitespace-nowrap">Delivery fee</th>
-                  {(settings?.products ?? []).map((p) => (
-                    <th key={p.name} className="px-3 py-2 text-right whitespace-nowrap">
-                      Rep {p.name}
-                    </th>
-                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10">
                 {daily.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-4 text-zinc-500" colSpan={5 + (settings?.products?.length ?? 0)}>
+                    <td className="px-3 py-4 text-zinc-500" colSpan={5}>
                       No successful orders found for this month.
                     </td>
                   </tr>
@@ -293,11 +285,6 @@ export default function SalesReportPage() {
                       <td className="px-3 py-2 text-right tabular-nums">{currency(d.subscriptionAmount)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{currency(d.repurchaseTotal)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{currency(d.deliveryFee)}</td>
-                      {(settings?.products ?? []).map((p) => (
-                        <td key={`${d.date}-${p.name}`} className="px-3 py-2 text-right tabular-nums text-zinc-300">
-                          {currency(d.repurchaseByProduct[p.name] ?? 0)}
-                        </td>
-                      ))}
                     </tr>
                   ))
                 )}
