@@ -147,14 +147,32 @@ export default function SalesReportPage() {
 
       dr.deliveryFee += deliveryFee;
 
-      // Repurchase amount by product using SRP (member pricing is usually for packages/subscriptions).
+      // Repurchase amount by product using SRP, except chips have bulk member pricing tiers.
       const rep = row["repurchaseProducts"] as ProductBreakdown | undefined;
       let repurchaseAmt = 0;
       if (rep && typeof rep === "object") {
+        // Chips bulk pricing (members): tier is based on total chips qty across flavors on THIS order.
+        const chipsKeys = Object.keys(rep).filter((k) => k.toLowerCase().includes("chips"));
+        const chipsQty = chipsKeys.reduce((acc, k) => acc + (Number((rep as Record<string, unknown>)[k]) || 0), 0);
+        const chipsTierPrice =
+          !isMember || chipsQty <= 0
+            ? null
+            : chipsQty >= 50
+              ? 99
+              : chipsQty >= 30
+                ? 105
+                : chipsQty >= 15
+                  ? 115
+                  : 129;
+
         for (const [name, qtyRaw] of Object.entries(rep)) {
           const qty = Number(qtyRaw) || 0;
           if (qty <= 0) continue;
-          const price = productPriceByName.get(name)?.srp ?? 0;
+          const isChips = name.toLowerCase().includes("chips");
+          const price =
+            isChips && chipsTierPrice != null
+              ? chipsTierPrice
+              : (productPriceByName.get(name)?.srp ?? 0);
           const amt = qty * price;
           repurchaseAmt += amt;
           dr.repurchaseByProduct[name] = (dr.repurchaseByProduct[name] ?? 0) + amt;
@@ -165,26 +183,17 @@ export default function SalesReportPage() {
       // Package revenue: use packagePrice when present.
       if (packagePrice > 0) dr.packageAmount += packagePrice;
 
-      // Subscription amount: prefer product breakdown * price; otherwise use residual from total.
+      // Subscription amount: per spec, use (successful subscription order count) × 498.
       const sub = row["subscriptionProducts"] as ProductBreakdown | undefined;
-      let subAmt = 0;
-      if (sub && typeof sub === "object") {
-        for (const [name, qtyRaw] of Object.entries(sub)) {
-          const qty = Number(qtyRaw) || 0;
-          if (qty <= 0) continue;
-          const p = productPriceByName.get(name);
-          const price = isMember ? (p?.membersPrice ?? 0) : (p?.srp ?? 0);
-          subAmt += qty * price;
-        }
-      }
-      if (subAmt <= 0) {
-        const residual = totalAmount - deliveryFee - merchantFee - packagePrice - repurchaseAmt;
-        if (residual > 0) subAmt = residual;
-      }
-      dr.subscriptionAmount += subAmt;
+      const hasSubscription =
+        sub && typeof sub === "object"
+          ? Object.values(sub).some((v) => (Number(v) || 0) > 0)
+          : false;
+      if (hasSubscription) dr.subscriptionAmount += 498;
     }
 
-    return Array.from(out.values()).sort((a, b) => b.date.localeCompare(a.date));
+    // Oldest → latest (top-down)
+    return Array.from(out.values()).sort((a, b) => a.date.localeCompare(b.date));
   }, [rows, settings, productPriceByName]);
 
   const monthTotals = useMemo(() => {
@@ -203,7 +212,7 @@ export default function SalesReportPage() {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_420px]">
-      <div className="admin-card">
+      <div className="admin-card min-w-0">
         <h1 className="admin-title">Sales Report</h1>
         <div className="admin-muted">Based on confirmed orders, including status adjustments.</div>
 
@@ -253,7 +262,7 @@ export default function SalesReportPage() {
           <div className="text-sm font-semibold">Daily totals (by effective date)</div>
           <div className="mt-1 text-xs text-zinc-400">Default: current month</div>
 
-          <div className="admin-table-wrap mt-3 overflow-auto">
+          <div className="admin-table-wrap mt-3 max-w-full overflow-x-auto">
             <table className="min-w-[860px] text-xs">
               <thead className="bg-black/30 text-zinc-300">
                 <tr>

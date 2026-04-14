@@ -18,6 +18,16 @@ import {
 import type { OrderClaimRecord } from "@/data/admin/types";
 import { useAdminSession } from "../AdminSessionContext";
 
+async function safeReadJson<T>(res: Response): Promise<T> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const snippet = text.slice(0, 140).replace(/\s+/g, " ").trim();
+    throw new Error(`Bad response (${res.status}). Expected JSON but got: ${snippet || "(empty)"}`);
+  }
+}
+
 type ParsedRow = {
   rowIndex: number;
   distributorId: string;
@@ -375,7 +385,7 @@ export default function OrdersPage() {
 
   const loadIndex = async () => {
     const res = await fetch("/api/admin/orders", { cache: "no-store" });
-    const json = (await res.json()) as { index?: OrdersImportSummary[]; error?: string };
+    const json = await safeReadJson<{ index?: OrdersImportSummary[]; error?: string }>(res);
     if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
     setIndex(json.index ?? []);
   };
@@ -417,11 +427,11 @@ export default function OrdersPage() {
       const start = startDate <= endDate ? startDate : endDate;
       const end = startDate <= endDate ? endDate : startDate;
       const res = await fetch(`/api/admin/orders/compiled?start=${start}&end=${end}`, { cache: "no-store" });
-      const json = (await res.json()) as {
+      const json = await safeReadJson<{
         rows?: Array<ParsedRow & { date: string }>;
         claims?: Record<string, OrderClaimRecord>;
         error?: string;
-      };
+      }>(res);
       if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
       setRows((json.rows ?? []) as Array<ParsedRow & { date: string }>);
       setClaims((json.claims ?? {}) as Record<string, OrderClaimRecord>);

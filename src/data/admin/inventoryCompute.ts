@@ -1,9 +1,18 @@
 import { mergeOrderRowWithAdjustment } from "@/data/admin/orderAdjustmentMerge";
 import { lookupInvoiceParsedRow } from "@/data/admin/orderInvoiceLookup";
 import { readOrdersDayAsync } from "@/data/admin/orders";
-import { getClaimCalendarYmd, isOrderClaimedForInventory } from "@/data/admin/orderClaim";
+import { calendarYmdInTimeZone, getClaimCalendarYmd, isOrderClaimedForInventory } from "@/data/admin/orderClaim";
 import type { OrderClaimsMap } from "@/data/admin/orderClaim";
 import { loadOrderAdjustments, loadOrderClaims, loadOrdersIndex } from "@/data/admin/storage";
+
+function fastClaimYmd(invoiceNumber: string, claims: OrderClaimsMap): string | null {
+  const rec = claims[invoiceNumber];
+  if (!rec) return null;
+  const raw = rec.claimDate?.trim();
+  if (raw && /^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  if (rec.claimedAt) return calendarYmdInTimeZone(new Date(rec.claimedAt), "Asia/Manila");
+  return null;
+}
 
 export type InventoryOutTotals = Record<string, number>;
 
@@ -129,7 +138,7 @@ export async function computeClaimedOutTotalsForRange(start: string, end: string
       const adj = adjustments[invoiceNumber];
       const merged = mergeOrderRowWithAdjustment(rec as Record<string, unknown>, adj);
       const effectiveDate = adj?.effectiveDate ?? sourceDate;
-      const claimYmd = getClaimCalendarYmd(invoiceNumber, claims as OrderClaimsMap);
+      const claimYmd = fastClaimYmd(invoiceNumber, claims as OrderClaimsMap);
       const inventoryDay = claimYmd ?? effectiveDate;
       if (inventoryDay < start || inventoryDay > end) continue;
 
@@ -168,12 +177,27 @@ export async function computeClaimedOutTotalsForRange(start: string, end: string
   // Inventory "Out" for a selected day should include orders whose CLAIM DAY is in [start, end],
   // even if the source sheet date is outside the window.
   const claimEntries = Object.entries(claims as OrderClaimsMap);
+  const invoicesToLookup: string[] = [];
   for (const [invoiceNumber] of claimEntries) {
     if (seenInvoices.has(invoiceNumber)) continue;
-    const claimYmd = getClaimCalendarYmd(invoiceNumber, claims as OrderClaimsMap);
+    const claimYmd = fastClaimYmd(invoiceNumber, claims as OrderClaimsMap);
     if (!claimYmd || claimYmd < start || claimYmd > end) continue;
+    invoicesToLookup.push(invoiceNumber);
+  }
 
-    const found = await lookupInvoiceParsedRow(invoiceNumber);
+  const lookedUp = await Promise.all(
+    invoicesToLookup.map(async (invoiceNumber) => ({
+      invoiceNumber,
+      claimYmd: fastClaimYmd(invoiceNumber, claims as OrderClaimsMap) as string,
+      found: await lookupInvoiceParsedRow(invoiceNumber),
+    })),
+  );
+
+  for (const item of lookedUp) {
+    const invoiceNumber = item.invoiceNumber;
+    const claimYmd = item.claimYmd;
+    if (seenInvoices.has(invoiceNumber)) continue;
+    const found = item.found;
     if (!found) continue;
     const adj = adjustments[invoiceNumber];
     const merged = mergeOrderRowWithAdjustment(found.rec as Record<string, unknown>, adj);
@@ -270,7 +294,7 @@ export async function computeClaimedOutDetailsForRange(
       const adj = adjustments[invoiceNumber];
       const merged = mergeOrderRowWithAdjustment(rec as Record<string, unknown>, adj);
       const effectiveDate = adj?.effectiveDate ?? sourceDate;
-      const claimYmd = getClaimCalendarYmd(invoiceNumber, claims as OrderClaimsMap);
+      const claimYmd = fastClaimYmd(invoiceNumber, claims as OrderClaimsMap);
       const inventoryDay = claimYmd ?? effectiveDate;
       if (inventoryDay < start || inventoryDay > end) continue;
 
@@ -324,12 +348,27 @@ export async function computeClaimedOutDetailsForRange(
 
   // Also include orders whose CLAIM DAY is within the window (even if imported earlier).
   const claimEntries = Object.entries(claims as OrderClaimsMap);
+  const invoicesToLookup: string[] = [];
   for (const [invoiceNumber] of claimEntries) {
     if (seenInvoices.has(invoiceNumber)) continue;
-    const claimYmd = getClaimCalendarYmd(invoiceNumber, claims as OrderClaimsMap);
+    const claimYmd = fastClaimYmd(invoiceNumber, claims as OrderClaimsMap);
     if (!claimYmd || claimYmd < start || claimYmd > end) continue;
+    invoicesToLookup.push(invoiceNumber);
+  }
 
-    const found = await lookupInvoiceParsedRow(invoiceNumber);
+  const lookedUp = await Promise.all(
+    invoicesToLookup.map(async (invoiceNumber) => ({
+      invoiceNumber,
+      claimYmd: fastClaimYmd(invoiceNumber, claims as OrderClaimsMap) as string,
+      found: await lookupInvoiceParsedRow(invoiceNumber),
+    })),
+  );
+
+  for (const item of lookedUp) {
+    const invoiceNumber = item.invoiceNumber;
+    const claimYmd = item.claimYmd;
+    if (seenInvoices.has(invoiceNumber)) continue;
+    const found = item.found;
     if (!found) continue;
     const adj = adjustments[invoiceNumber];
     const merged = mergeOrderRowWithAdjustment(found.rec as Record<string, unknown>, adj);

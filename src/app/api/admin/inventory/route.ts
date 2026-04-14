@@ -114,6 +114,7 @@ export async function GET(req: Request) {
     .filter((d) => d < dayKey)
     .sort((a, b) => b.localeCompare(a))[0];
   const prevRec = prevDate ? ending.byDate[prevDate] : undefined;
+  const beginningBy = prevRec?.counts ?? {};
 
   const expectedEndingBy: Record<string, number> = {};
   const discrepancyBy: Record<string, number> = {};
@@ -143,6 +144,7 @@ export async function GET(req: Request) {
     entries: entriesInPeriod,
     outDetails,
     totals: { deliveryIn: totalDeliveryIn, out: totalOut },
+    beginningBy,
     ending: endingRec,
     canEditEncodedEnding,
     expectedEndingBy,

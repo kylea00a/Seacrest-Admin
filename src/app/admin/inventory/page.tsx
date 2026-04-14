@@ -55,6 +55,7 @@ export default function InventoryPage() {
   const [canEditEncodedEnding, setCanEditEncodedEnding] = useState(false);
   const [expectedEndingBy, setExpectedEndingBy] = useState<Record<string, number>>({});
   const [discrepancyBy, setDiscrepancyBy] = useState<Record<string, number>>({});
+  const [beginningBy, setBeginningBy] = useState<Record<string, number>>({});
   const [endingDraft, setEndingDraft] = useState<Record<string, string>>({});
   const [savingEnding, setSavingEnding] = useState(false);
   const [rangeLabel, setRangeLabel] = useState<{ start: string; end: string }>({ start: "", end: "" });
@@ -80,6 +81,7 @@ export default function InventoryPage() {
         outDetails?: OutOrderDetail[];
         totals?: { deliveryIn: number; out: number };
         productNames?: string[];
+        beginningBy?: Record<string, number>;
         ending?: EndingSnapshot | null;
         canEditEncodedEnding?: boolean;
         expectedEndingBy?: Record<string, number>;
@@ -96,6 +98,7 @@ export default function InventoryPage() {
       setProductNames(json.productNames ?? []);
       setEnding((json.ending ?? null) as EndingSnapshot | null);
       setCanEditEncodedEnding(Boolean(json.canEditEncodedEnding));
+      setBeginningBy((json.beginningBy ?? {}) as Record<string, number>);
       setExpectedEndingBy((json.expectedEndingBy ?? {}) as Record<string, number>);
       setDiscrepancyBy((json.discrepancyBy ?? {}) as Record<string, number>);
       const nextDraft: Record<string, string> = {};
@@ -300,6 +303,7 @@ export default function InventoryPage() {
             <thead className="bg-black/30 text-zinc-300">
               <tr>
                 <th className="px-3 py-2 text-left">Product</th>
+                <th className="px-3 py-2 text-right whitespace-nowrap">Beginning</th>
                 <th className="px-3 py-2 text-right">Delivery in</th>
                 <th className="px-3 py-2 text-right">Out (claimed)</th>
                 <th className="px-3 py-2 text-right">Net</th>
@@ -311,7 +315,7 @@ export default function InventoryPage() {
             <tbody className="divide-y divide-white/10">
               {rows.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-4 text-zinc-500" colSpan={7}>
+                  <td className="px-3 py-4 text-zinc-500" colSpan={8}>
                     No products in settings yet, or no movement on this day.
                   </td>
                 </tr>
@@ -319,6 +323,9 @@ export default function InventoryPage() {
                 rows.map((r) => (
                   <tr key={r.productName} className="bg-black/10 text-zinc-100">
                     <td className="px-3 py-2">{r.productName}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
+                      {beginningBy[r.productName] != null ? beginningBy[r.productName] : 0}
+                    </td>
                     <td className="px-3 py-2 text-right tabular-nums text-emerald-300/90">{r.deliveryIn}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-rose-300/90">{r.out}</td>
                     <td
