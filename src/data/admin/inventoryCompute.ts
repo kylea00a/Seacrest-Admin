@@ -1,5 +1,4 @@
 import { mergeOrderRowWithAdjustment } from "@/data/admin/orderAdjustmentMerge";
-import { lookupInvoiceParsedRow } from "@/data/admin/orderInvoiceLookup";
 import { readOrdersDayAsync } from "@/data/admin/orders";
 import { calendarYmdInTimeZone, getClaimCalendarYmd, isOrderClaimedForInventory } from "@/data/admin/orderClaim";
 import type { OrderClaimsMap } from "@/data/admin/orderClaim";
@@ -12,6 +11,44 @@ function fastClaimYmd(invoiceNumber: string, claims: OrderClaimsMap): string | n
   if (raw && /^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
   if (rec.claimedAt) return calendarYmdInTimeZone(new Date(rec.claimedAt), "Asia/Manila");
   return null;
+}
+
+async function bulkLookupInvoicesParsedRows(
+  invoiceNumbers: string[],
+): Promise<Record<string, { sourceDate: string; rec: Record<string, unknown> }>> {
+  const want = new Set(invoiceNumbers.map((x) => x.trim()).filter(Boolean));
+  const out: Record<string, { sourceDate: string; rec: Record<string, unknown> }> = {};
+  if (want.size === 0) return out;
+
+  const index = loadOrdersIndex();
+  const dates = [...new Set(index.map((i) => i.date))].sort((a, b) => b.localeCompare(a));
+
+  for (const sourceDate of dates) {
+    if (want.size === 0) break;
+    const dayUnknown = await readOrdersDayAsync(sourceDate);
+    const day =
+      typeof dayUnknown === "object" && dayUnknown !== null
+        ? (dayUnknown as Record<string, unknown>)
+        : null;
+    const parsed =
+      day && typeof day["parsed"] === "object" && day["parsed"] !== null
+        ? (day["parsed"] as Record<string, unknown>)
+        : null;
+    const parsedRows = parsed?.["rows"];
+    if (!Array.isArray(parsedRows)) continue;
+
+    for (const r of parsedRows) {
+      if (want.size === 0) break;
+      if (typeof r !== "object" || r === null) continue;
+      const rec = r as Record<string, unknown>;
+      const invoiceNumber = typeof rec["invoiceNumber"] === "string" ? (rec["invoiceNumber"] as string).trim() : "";
+      if (!invoiceNumber || !want.has(invoiceNumber)) continue;
+      out[invoiceNumber] = { sourceDate, rec };
+      want.delete(invoiceNumber);
+    }
+  }
+
+  return out;
 }
 
 export type InventoryOutTotals = Record<string, number>;
@@ -185,19 +222,12 @@ export async function computeClaimedOutTotalsForRange(start: string, end: string
     invoicesToLookup.push(invoiceNumber);
   }
 
-  const lookedUp = await Promise.all(
-    invoicesToLookup.map(async (invoiceNumber) => ({
-      invoiceNumber,
-      claimYmd: fastClaimYmd(invoiceNumber, claims as OrderClaimsMap) as string,
-      found: await lookupInvoiceParsedRow(invoiceNumber),
-    })),
-  );
-
-  for (const item of lookedUp) {
-    const invoiceNumber = item.invoiceNumber;
-    const claimYmd = item.claimYmd;
+  const lookedUp = await bulkLookupInvoicesParsedRows(invoicesToLookup);
+  for (const invoiceNumber of invoicesToLookup) {
     if (seenInvoices.has(invoiceNumber)) continue;
-    const found = item.found;
+    const claimYmd = fastClaimYmd(invoiceNumber, claims as OrderClaimsMap);
+    if (!claimYmd) continue;
+    const found = lookedUp[invoiceNumber];
     if (!found) continue;
     const adj = adjustments[invoiceNumber];
     const merged = mergeOrderRowWithAdjustment(found.rec as Record<string, unknown>, adj);
@@ -356,19 +386,12 @@ export async function computeClaimedOutDetailsForRange(
     invoicesToLookup.push(invoiceNumber);
   }
 
-  const lookedUp = await Promise.all(
-    invoicesToLookup.map(async (invoiceNumber) => ({
-      invoiceNumber,
-      claimYmd: fastClaimYmd(invoiceNumber, claims as OrderClaimsMap) as string,
-      found: await lookupInvoiceParsedRow(invoiceNumber),
-    })),
-  );
-
-  for (const item of lookedUp) {
-    const invoiceNumber = item.invoiceNumber;
-    const claimYmd = item.claimYmd;
+  const lookedUp = await bulkLookupInvoicesParsedRows(invoicesToLookup);
+  for (const invoiceNumber of invoicesToLookup) {
     if (seenInvoices.has(invoiceNumber)) continue;
-    const found = item.found;
+    const claimYmd = fastClaimYmd(invoiceNumber, claims as OrderClaimsMap);
+    if (!claimYmd) continue;
+    const found = lookedUp[invoiceNumber];
     if (!found) continue;
     const adj = adjustments[invoiceNumber];
     const merged = mergeOrderRowWithAdjustment(found.rec as Record<string, unknown>, adj);
