@@ -180,13 +180,10 @@ export default function SalesReportPage() {
       // Package revenue: use packagePrice when present.
       if (packagePrice > 0) dr.packageAmount += packagePrice;
 
-      // Subscription amount: per spec, use (successful subscription order count) × 498.
-      const sub = row["subscriptionProducts"] as ProductBreakdown | undefined;
-      const hasSubscription =
-        sub && typeof sub === "object"
-          ? Object.values(sub).some((v) => (Number(v) || 0) > 0)
-          : false;
-      if (hasSubscription) dr.subscriptionAmount += 498;
+      // Subscription amount: per spec, use (successful subscription count on that day) × 498.
+      // This is based on the order's effective/import date (same Date shown in All Orders), not claim date.
+      const subCount = num(row["subscriptionsCount"]);
+      if (subCount > 0) dr.subscriptionAmount += subCount * 498;
     }
 
     // Oldest → latest (top-down)
