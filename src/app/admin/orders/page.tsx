@@ -442,9 +442,36 @@ export default function OrdersPage() {
     }
   }, [index.length, startDate, endDate]);
 
+  const refetchSearchRows = useCallback(async () => {
+    const q = search.trim();
+    if (!q) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const qs = new URLSearchParams({ q, limit: "500" });
+      const res = await fetch(`/api/admin/orders/search?${qs.toString()}`, { cache: "no-store" });
+      const json = await safeReadJson<{
+        rows?: Array<ParsedRow & { date: string }>;
+        claims?: Record<string, OrderClaimRecord>;
+        error?: string;
+      }>(res);
+      if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
+      setRows((json.rows ?? []) as Array<ParsedRow & { date: string }>);
+      setClaims((json.claims ?? {}) as Record<string, OrderClaimRecord>);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [search]);
+
   useEffect(() => {
-    void refetchCompiledRows();
-  }, [refetchCompiledRows]);
+    if (search.trim()) {
+      void refetchSearchRows();
+    } else {
+      void refetchCompiledRows();
+    }
+  }, [refetchCompiledRows, refetchSearchRows, search]);
 
   const resetClaimDatesApr10 = async () => {
     if (!isSuperadmin || !canFullOrderEdit) return;
