@@ -22,6 +22,14 @@ import { requireApiPermission } from "@/lib/adminApiAuth";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+function todayISO(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function mapRawStatusToAdjustment(status: string): OrderStatusAdjustmentValue {
   const s = (status ?? "").toLowerCase();
   if (s.includes("cancel")) return "Cancelled";
@@ -197,7 +205,15 @@ export async function POST(req: Request) {
   const next: OrderAdjustment = {
     invoiceNumber,
     status: existing?.status ?? mapRawStatusToAdjustment(String(found.rec["status"] ?? "")),
-    effectiveDate: existing?.effectiveDate ?? found.sourceDate,
+    effectiveDate:
+      (() => {
+        const currentMerged = mergeOrderRowWithAdjustment(found.rec as Record<string, unknown>, existing);
+        const currentDm =
+          typeof currentMerged["deliveryMethod"] === "string" ? (currentMerged["deliveryMethod"] as string).trim() : "";
+        // When converting an old Pick-up order to Delivery, default the effective date to today.
+        if (isPickupDelivery(currentDm) && isNonPickupDelivery(proposedDm)) return todayISO();
+        return existing?.effectiveDate ?? found.sourceDate;
+      })(),
     savedAt: new Date().toISOString(),
     lineDetails,
   };

@@ -40,18 +40,13 @@ export async function GET(req: Request) {
   const claims = loadOrderClaims();
   const packages = loadAdminSettings().packages;
 
-  const dates = index.map((i) => i.date).sort((a, b) => b.localeCompare(a));
-  const dayPayloads = await Promise.all(
-    dates.map(async (sourceDate) => {
-      const dayUnknown = await readOrdersDayAsync(sourceDate);
-      return { sourceDate, dayUnknown };
-    }),
-  );
-
   const rows: Array<Record<string, unknown>> = [];
 
-  for (const { sourceDate, dayUnknown } of dayPayloads) {
+  // Read sequentially + early-stop to avoid timeouts (nginx 502) on large histories.
+  const dates = index.map((i) => i.date).sort((a, b) => b.localeCompare(a));
+  for (const sourceDate of dates) {
     if (rows.length >= limit) break;
+    const dayUnknown = await readOrdersDayAsync(sourceDate);
     const day =
       typeof dayUnknown === "object" && dayUnknown !== null
         ? (dayUnknown as Record<string, unknown>)

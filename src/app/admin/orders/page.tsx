@@ -466,11 +466,12 @@ export default function OrdersPage() {
   }, [search]);
 
   useEffect(() => {
-    if (search.trim()) {
-      void refetchSearchRows();
-    } else {
-      void refetchCompiledRows();
-    }
+    const q = search.trim();
+    const t = window.setTimeout(() => {
+      if (q) void refetchSearchRows();
+      else void refetchCompiledRows();
+    }, 250);
+    return () => window.clearTimeout(t);
   }, [refetchCompiledRows, refetchSearchRows, search]);
 
   const resetClaimDatesApr10 = async () => {
