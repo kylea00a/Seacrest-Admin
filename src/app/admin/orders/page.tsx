@@ -746,7 +746,7 @@ export default function OrdersPage() {
               <th
                 className="orders-pin-1 px-3 py-2 text-left"
                 rowSpan={headRowSpan}
-                title="For delivery orders, this is the claim calendar day when set (same as Claim date); otherwise the effective order day."
+                title="Imported/effective date (does not change when claimed)."
               >
                 Date
               </th>
@@ -1029,13 +1029,9 @@ export default function OrdersPage() {
                   <tr className="bg-black/10 text-zinc-100">
                     <td
                       className="orders-pin-1 px-3 py-2 whitespace-nowrap"
-                      title={
-                        isNonPickupDelivery(dm)
-                          ? "Delivery: uses claim calendar day when present (matches Claim date)."
-                          : undefined
-                      }
+                      title="Imported/effective date (does not change when claimed)."
                     >
-                      {editCalendarDay}
+                      {r.date}
                     </td>
                     <td className="orders-pin-2 px-3 py-2 whitespace-nowrap">{r.distributorId}</td>
                     <td
