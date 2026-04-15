@@ -365,7 +365,9 @@ export default function ImportOrdersPage() {
   const [importNotice, setImportNotice] = useState<string | null>(null);
   const [index, setIndex] = useState<OrdersImportSummary[]>([]);
   const [manageImports, setManageImports] = useState(false);
+  const [selectedDates, setSelectedDates] = useState<Record<string, boolean>>({});
   const [deletingDate, setDeletingDate] = useState<string>("");
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [savedPreviewDate, setSavedPreviewDate] = useState<string | null>(null);
   const [savedPreviewRows, setSavedPreviewRows] = useState<PreviewRow[]>([]);
   const [savedPreviewPage, setSavedPreviewPage] = useState(1);
@@ -388,6 +390,20 @@ export default function ImportOrdersPage() {
   useEffect(() => {
     loadIndex();
   }, []);
+
+  useEffect(() => {
+    if (!manageImports) {
+      setSelectedDates({});
+      return;
+    }
+    // Keep selections only for currently loaded index dates.
+    const allowed = new Set(index.map((x) => x.date));
+    setSelectedDates((prev) => {
+      const next: Record<string, boolean> = {};
+      for (const [k, v] of Object.entries(prev)) if (allowed.has(k) && v) next[k] = true;
+      return next;
+    });
+  }, [manageImports, index]);
 
   const toggleSavedImportPreview = async (dateStr: string) => {
     if (savedPreviewDate === dateStr && !loadingSavedDate) {
@@ -540,6 +556,52 @@ export default function ImportOrdersPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setDeletingDate("");
+    }
+  };
+
+  const selectedList = useMemo(() => Object.keys(selectedDates).filter((d) => selectedDates[d]), [selectedDates]);
+  const allVisibleDates = useMemo(() => index.slice(0, 20).map((i) => i.date), [index]);
+  const allVisibleSelected = useMemo(
+    () => allVisibleDates.length > 0 && allVisibleDates.every((d) => Boolean(selectedDates[d])),
+    [allVisibleDates, selectedDates],
+  );
+
+  const toggleSelectAllVisible = () => {
+    setSelectedDates((prev) => {
+      const next = { ...prev };
+      const nextVal = !allVisibleSelected;
+      for (const d of allVisibleDates) {
+        if (nextVal) next[d] = true;
+        else delete next[d];
+      }
+      return next;
+    });
+  };
+
+  const bulkDeleteSelected = async () => {
+    if (selectedList.length === 0) return;
+    const ok = window.confirm(
+      `Delete ${selectedList.length} import day(s)? This removes them from Sales Report and Delivery.`,
+    );
+    if (!ok) return;
+    setBulkDeleting(true);
+    setError(null);
+    try {
+      const qp = new URLSearchParams({ dates: selectedList.join(",") });
+      const res = await fetch(`/api/admin/orders?${qp.toString()}`, { method: "DELETE" });
+      const json = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
+      setSelectedDates({});
+      await loadIndex();
+      if (savedPreviewDate && selectedDates[savedPreviewDate]) {
+        setSavedPreviewDate(null);
+        setSavedPreviewRows([]);
+        setSavedPreviewError(null);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -790,6 +852,28 @@ export default function ImportOrdersPage() {
           </label>
         </div>
 
+        {manageImports ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-black/20 p-2">
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-zinc-300">
+              <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} />
+              Select all (visible)
+            </label>
+            <div className="flex items-center gap-2">
+              <div className="text-xs text-zinc-400">
+                Selected: <span className="font-semibold text-zinc-200">{selectedList.length}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void bulkDeleteSelected()}
+                disabled={bulkDeleting || selectedList.length === 0}
+                className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-500/20 disabled:opacity-60"
+              >
+                {bulkDeleting ? "Deleting…" : "Delete selected"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-4 space-y-2">
           {index.length === 0 ? (
             <div className="text-sm text-zinc-300">No imports yet.</div>
@@ -807,6 +891,7 @@ export default function ImportOrdersPage() {
                 }}
                 onClick={(e) => {
                   if ((e.target as HTMLElement).closest("button")) return;
+                  if ((e.target as HTMLElement).closest("input")) return;
                   void toggleSavedImportPreview(i.date);
                 }}
                 className={`rounded-2xl border bg-black/20 p-3 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-emerald-500/40 ${
@@ -821,6 +906,22 @@ export default function ImportOrdersPage() {
                     <div className="mt-1 truncate text-xs text-zinc-400">{i.filename}</div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
+                    {manageImports ? (
+                      <label className="flex items-center gap-2 text-xs text-zinc-300">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(selectedDates[i.date])}
+                          onChange={(e) =>
+                            setSelectedDates((prev) => {
+                              const next = { ...prev };
+                              if (e.target.checked) next[i.date] = true;
+                              else delete next[i.date];
+                              return next;
+                            })
+                          }
+                        />
+                      </label>
+                    ) : null}
                     <div className="text-xs text-zinc-400">
                       {loadingSavedDate === i.date ? "Loading…" : `${i.totalRows} rows`}
                     </div>
