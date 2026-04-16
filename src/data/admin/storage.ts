@@ -5,6 +5,8 @@ import type {
   AdminPackageItem,
   AdminProductItem,
   AdminSettings,
+  BankAccount,
+  CashTransaction,
   Department,
   Expense,
   InventorySupplyEntry,
@@ -28,6 +30,7 @@ const ORDER_ADJUSTMENTS_FILE = path.join(ADMIN_DATA_DIR, "orderAdjustments.json"
 const ORDER_CLAIMS_FILE = path.join(ADMIN_DATA_DIR, "orderClaims.json");
 const INVENTORY_SUPPLY_FILE = path.join(ADMIN_DATA_DIR, "inventorySupply.json");
 const INVENTORY_ENDING_FILE = path.join(ADMIN_DATA_DIR, "inventoryEnding.json");
+const CASH_LEDGER_FILE = path.join(ADMIN_DATA_DIR, "cashLedger.json");
 
 function ensureAdminDir() {
   if (!fs.existsSync(ADMIN_DATA_DIR)) fs.mkdirSync(ADMIN_DATA_DIR, { recursive: true });
@@ -242,6 +245,23 @@ export function loadOrderClaims(): OrderClaimsFile {
 
 export function saveOrderClaims(map: OrderClaimsFile) {
   writeJsonFile(ORDER_CLAIMS_FILE, map);
+}
+
+export type CashLedgerFile = {
+  accounts: BankAccount[];
+  transactions: CashTransaction[];
+};
+
+export function loadCashLedger(): CashLedgerFile {
+  const raw = readJsonFile<unknown>(CASH_LEDGER_FILE, { accounts: [], transactions: [] });
+  const obj = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+  const accounts = Array.isArray(obj?.accounts) ? (obj?.accounts as BankAccount[]) : [];
+  const transactions = Array.isArray(obj?.transactions) ? (obj?.transactions as CashTransaction[]) : [];
+  return { accounts, transactions };
+}
+
+export function saveCashLedger(file: CashLedgerFile) {
+  writeJsonFile(CASH_LEDGER_FILE, file);
 }
 
 export type InventorySupplyFile = {

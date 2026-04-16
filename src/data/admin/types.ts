@@ -159,3 +159,28 @@ export interface InventoryEndingSnapshot {
   discrepancyBy?: Record<string, number>;
 }
 
+export interface BankAccount {
+  id: string;
+  name: string;
+  bank: string;
+  accountName: string;
+  createdAt: string; // ISO
+}
+
+export interface CashTransaction {
+  id: string;
+  accountId: string;
+  /** YYYY-MM-DD */
+  date: string;
+  description: string;
+  debit: number;
+  credit: number;
+  createdAt: string; // ISO
+  /** Optional classification for idempotency / UI toggles. */
+  kind?: "sales_deposit" | "custom";
+  /** When kind = sales_deposit, the sales day being deposited (YYYY-MM-DD). */
+  salesDate?: string;
+  /** When kind = sales_deposit, the calendar day it was marked deposited (YYYY-MM-DD). */
+  depositedAt?: string;
+}
+

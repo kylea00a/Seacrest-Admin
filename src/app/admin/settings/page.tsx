@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import PackagesProductsEditor from "../_components/PackagesProductsEditor";
 import type { AdminSettings } from "@/data/admin/types";
+import type { BankAccount } from "@/data/admin/types";
 
 function uniq(list: string[]): string[] {
   return Array.from(new Set(list.map((s) => s.trim()).filter(Boolean)));
@@ -13,6 +14,11 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [settings, setSettings] = useState<AdminSettings | null>(null);
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
+  const [bankName, setBankName] = useState("");
+  const [bankBank, setBankBank] = useState("");
+  const [bankAccountName, setBankAccountName] = useState("");
+  const [savingBank, setSavingBank] = useState(false);
 
   const [newExpenseCategory, setNewExpenseCategory] = useState("");
   const [newPettyCategory, setNewPettyCategory] = useState("");
@@ -26,6 +32,9 @@ export default function SettingsPage() {
       if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
       const s = json.settings ?? null;
       setSettings(s);
+      const cashRes = await fetch("/api/admin/cash", { cache: "no-store" });
+      const cashJson = (await cashRes.json()) as { accounts?: BankAccount[]; error?: string };
+      if (cashRes.ok) setBankAccounts(cashJson.accounts ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -85,6 +94,53 @@ export default function SettingsPage() {
     await save({ pettyCashCategories: uniq((settings?.pettyCashCategories ?? []).filter((c) => c !== value)) });
   };
 
+  const addBankAccount = async () => {
+    const name = bankName.trim();
+    const bank = bankBank.trim();
+    const accountName = bankAccountName.trim();
+    if (!name || !bank || !accountName) return;
+    setSavingBank(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/cash", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "upsertAccount", name, bank, accountName }),
+      });
+      const json = (await res.json()) as { ok?: boolean; file?: { accounts?: BankAccount[] }; error?: string };
+      if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
+      setBankAccounts(json.file?.accounts ?? []);
+      setBankName("");
+      setBankBank("");
+      setBankAccountName("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingBank(false);
+    }
+  };
+
+  const deleteBankAccount = async (id: string) => {
+    const ok = window.confirm("Delete this bank account? This also deletes its SOA transactions.");
+    if (!ok) return;
+    setSavingBank(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/cash", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "deleteAccount", id }),
+      });
+      const json = (await res.json()) as { ok?: boolean; file?: { accounts?: BankAccount[] }; error?: string };
+      if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
+      setBankAccounts(json.file?.accounts ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingBank(false);
+    }
+  };
+
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
       <div className="space-y-6">
@@ -105,6 +161,59 @@ export default function SettingsPage() {
         ) : null}
 
         <div className="mt-6 grid gap-6">
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold">Bank Accounts</div>
+                <div className="mt-1 text-xs text-zinc-400">
+                  Used for <strong>Cash Balances</strong> (SOA) and Sales Report deposits.
+                </div>
+              </div>
+              <div className="text-xs text-zinc-400">{bankAccounts.length} accounts</div>
+            </div>
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <div>
+                <div className="text-xs font-semibold text-zinc-400">Name</div>
+                <input value={bankName} onChange={(e) => setBankName(e.target.value)} className="admin-input mt-1 w-full" placeholder="e.g. Main" />
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-zinc-400">Bank</div>
+                <input value={bankBank} onChange={(e) => setBankBank(e.target.value)} className="admin-input mt-1 w-full" placeholder="e.g. BPI" />
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-zinc-400">Account name</div>
+                <input value={bankAccountName} onChange={(e) => setBankAccountName(e.target.value)} className="admin-input mt-1 w-full" placeholder="Account holder name" />
+              </div>
+            </div>
+            <div className="mt-3">
+              <button type="button" onClick={() => void addBankAccount()} disabled={savingBank} className="admin-btn-primary">
+                {savingBank ? "Saving…" : "Add bank account"}
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {bankAccounts.map((a) => (
+                <div key={a.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-zinc-100">{a.name}</div>
+                    <div className="text-xs text-zinc-400">
+                      {a.bank} • {a.accountName}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void deleteBankAccount(a.id)}
+                    disabled={savingBank}
+                    className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-500/20 disabled:opacity-60"
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+              {bankAccounts.length === 0 ? <div className="text-xs text-zinc-500">No bank accounts yet.</div> : null}
+            </div>
+          </div>
           <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>

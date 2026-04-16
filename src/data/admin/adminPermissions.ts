@@ -50,6 +50,7 @@ export function adminPathToPermissionKey(pathname: string): AdminPermissionKey |
     departments: "departments",
     expenses: "expenses",
     "petty-cash": "pettyCash",
+    "cash-balances": "pettyCash",
     "sales-report": "salesReport",
     import: "import",
     orders: "orders",
