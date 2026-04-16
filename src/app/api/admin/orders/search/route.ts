@@ -43,9 +43,14 @@ export async function GET(req: Request) {
   const rows: Array<Record<string, unknown>> = [];
 
   // Read sequentially + early-stop to avoid timeouts (nginx 502) on large histories.
+  const startedAt = Date.now();
+  const maxMs = Math.min(4000, Math.max(500, Number(url.searchParams.get("maxMs") ?? 1500) || 1500));
+  let scannedDays = 0;
   const dates = index.map((i) => i.date).sort((a, b) => b.localeCompare(a));
   for (const sourceDate of dates) {
     if (rows.length >= limit) break;
+    if (Date.now() - startedAt > maxMs) break;
+    scannedDays += 1;
     const dayUnknown = await readOrdersDayAsync(sourceDate);
     const day =
       typeof dayUnknown === "object" && dayUnknown !== null
@@ -114,6 +119,7 @@ export async function GET(req: Request) {
     return String(a["invoiceNumber"] ?? "").localeCompare(String(b["invoiceNumber"] ?? ""));
   });
 
-  return NextResponse.json({ rows, count: rows.length, q: qRaw, claims });
+  const partial = rows.length < limit && scannedDays < dates.length && Date.now() - startedAt > maxMs;
+  return NextResponse.json({ rows, count: rows.length, q: qRaw, claims, partial, scannedDays });
 }
 

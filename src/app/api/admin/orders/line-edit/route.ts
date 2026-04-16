@@ -22,14 +22,6 @@ import { requireApiPermission } from "@/lib/adminApiAuth";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-function todayISO(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 function mapRawStatusToAdjustment(status: string): OrderStatusAdjustmentValue {
   const s = (status ?? "").toLowerCase();
   if (s.includes("cancel")) return "Cancelled";
@@ -82,6 +74,7 @@ export async function POST(req: Request) {
     invoiceNumber?: unknown;
     lineDetails?: unknown;
     claimDate?: unknown;
+    effectiveDate?: unknown;
   };
 
   const invoiceNumber = typeof body.invoiceNumber === "string" ? body.invoiceNumber.trim() : "";
@@ -90,6 +83,11 @@ export async function POST(req: Request) {
   const incomingClaimYmd =
     typeof body.claimDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.claimDate.trim())
       ? body.claimDate.trim()
+      : null;
+
+  const incomingEffectiveYmd =
+    typeof body.effectiveDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.effectiveDate.trim())
+      ? body.effectiveDate.trim()
       : null;
 
   const ldRaw = body.lineDetails;
@@ -205,15 +203,8 @@ export async function POST(req: Request) {
   const next: OrderAdjustment = {
     invoiceNumber,
     status: existing?.status ?? mapRawStatusToAdjustment(String(found.rec["status"] ?? "")),
-    effectiveDate:
-      (() => {
-        const currentMerged = mergeOrderRowWithAdjustment(found.rec as Record<string, unknown>, existing);
-        const currentDm =
-          typeof currentMerged["deliveryMethod"] === "string" ? (currentMerged["deliveryMethod"] as string).trim() : "";
-        // When converting an old Pick-up order to Delivery, default the effective date to today.
-        if (isPickupDelivery(currentDm) && isNonPickupDelivery(proposedDm)) return todayISO();
-        return existing?.effectiveDate ?? found.sourceDate;
-      })(),
+    // Date shown in All Orders should remain the import/effective date unless explicitly overridden in New Edit.
+    effectiveDate: bypassClaimDayLocks && incomingEffectiveYmd ? incomingEffectiveYmd : existing?.effectiveDate ?? found.sourceDate,
     savedAt: new Date().toISOString(),
     lineDetails,
   };

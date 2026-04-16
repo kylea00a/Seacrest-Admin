@@ -162,6 +162,8 @@ function OrderLineEditForm({
   newEditMode,
   claimDateValue,
   onClaimDateChange,
+  effectiveDateValue,
+  onEffectiveDateChange,
 }: {
   productKeys: string[];
   draft: LineEditDraft;
@@ -174,6 +176,9 @@ function OrderLineEditForm({
   /** YYYY-MM-DD for Asia/Manila claim calendar day (New Edit only). */
   claimDateValue: string;
   onClaimDateChange: (v: string) => void;
+  /** YYYY-MM-DD for order effective date override (New Edit only). */
+  effectiveDateValue: string;
+  onEffectiveDateChange: (v: string) => void;
 }) {
   const inp =
     "mt-0.5 w-full rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500/50";
@@ -215,15 +220,26 @@ function OrderLineEditForm({
         </p>
       ) : null}
       {newEditMode ? (
-        <label className="block text-xs text-zinc-400">
-          Claim date (Asia/Manila)
-          <input
-            type="date"
-            value={claimDateValue}
-            onChange={(e) => onClaimDateChange(e.target.value)}
-            className={inp}
-          />
-        </label>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block text-xs text-zinc-400">
+            Order date (effective)
+            <input
+              type="date"
+              value={effectiveDateValue}
+              onChange={(e) => onEffectiveDateChange(e.target.value)}
+              className={inp}
+            />
+          </label>
+          <label className="block text-xs text-zinc-400">
+            Claim date (Asia/Manila)
+            <input
+              type="date"
+              value={claimDateValue}
+              onChange={(e) => onClaimDateChange(e.target.value)}
+              className={inp}
+            />
+          </label>
+        </div>
       ) : null}
       <div className="grid gap-4 lg:grid-cols-3">
         {sec("Package products", productGrid("packageProducts"))}
@@ -373,6 +389,8 @@ export default function OrdersPage() {
   const [lineEditDrafts, setLineEditDrafts] = useState<Record<string, LineEditDraft>>({});
   /** YYYY-MM-DD — editable in New Edit, sent on save with bypass header. */
   const [claimDateDrafts, setClaimDateDrafts] = useState<Record<string, string>>({});
+  /** YYYY-MM-DD — editable in New Edit, saved as order effective date override. */
+  const [effectiveDateDrafts, setEffectiveDateDrafts] = useState<Record<string, string>>({});
   const [savingLineEdit, setSavingLineEdit] = useState<string>("");
   const [resettingClaims, setResettingClaims] = useState(false);
 
@@ -606,6 +624,10 @@ export default function OrdersPage() {
         newEditBypass && claimDateDrafts[invoiceNumber]?.match(/^\d{4}-\d{2}-\d{2}$/)
           ? claimDateDrafts[invoiceNumber]
           : undefined;
+      const effectiveDate =
+        newEditBypass && effectiveDateDrafts[invoiceNumber]?.match(/^\d{4}-\d{2}-\d{2}$/)
+          ? effectiveDateDrafts[invoiceNumber]
+          : undefined;
       const res = await fetch("/api/admin/orders/line-edit", {
         method: "POST",
         headers: {
@@ -616,6 +638,7 @@ export default function OrdersPage() {
           invoiceNumber,
           lineDetails,
           ...(claimDate ? { claimDate } : {}),
+          ...(effectiveDate ? { effectiveDate } : {}),
         }),
       });
       const json = (await res.json()) as { ok?: boolean; error?: string };
@@ -628,6 +651,11 @@ export default function OrdersPage() {
         return next;
       });
       setClaimDateDrafts((prev) => {
+        const next = { ...prev };
+        delete next[invoiceNumber];
+        return next;
+      });
+      setEffectiveDateDrafts((prev) => {
         const next = { ...prev };
         delete next[invoiceNumber];
         return next;
@@ -1274,6 +1302,10 @@ export default function OrdersPage() {
                               ...prev,
                               [inv]: getClaimCalendarYmd(inv, claims) ?? "",
                             }));
+                            setEffectiveDateDrafts((prev) => ({
+                              ...prev,
+                              [inv]: r.date ?? "",
+                            }));
                             setLineEditDrafts((prev) => ({
                               ...prev,
                               [inv]: rowToLineEditDraft(r, productKeys),
@@ -1297,6 +1329,10 @@ export default function OrdersPage() {
                           onClaimDateChange={(v) =>
                             setClaimDateDrafts((prev) => ({ ...prev, [inv]: v }))
                           }
+                          effectiveDateValue={effectiveDateDrafts[inv] ?? ""}
+                          onEffectiveDateChange={(v) =>
+                            setEffectiveDateDrafts((prev) => ({ ...prev, [inv]: v }))
+                          }
                           onChange={(next) =>
                             setLineEditDrafts((prev) => ({ ...prev, [inv]: next }))
                           }
@@ -1310,6 +1346,11 @@ export default function OrdersPage() {
                               return n;
                             });
                             setClaimDateDrafts((prev) => {
+                              const n = { ...prev };
+                              delete n[inv];
+                              return n;
+                            });
+                            setEffectiveDateDrafts((prev) => {
                               const n = { ...prev };
                               delete n[inv];
                               return n;
