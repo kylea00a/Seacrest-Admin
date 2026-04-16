@@ -519,6 +519,41 @@ export default function OrdersPage() {
 
   const [statusDraft, setStatusDraft] = useState<Record<string, StatusOption>>({});
   const [savingStatus, setSavingStatus] = useState<string>("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [addBasic, setAddBasic] = useState({
+    date: "",
+    distributorId: "",
+    distributorName: "",
+    invoiceNumber: "",
+    orderDate: "",
+    ordererName: "",
+    packageName: "",
+    packagePrice: "",
+    memberType: "unknown" as "member" | "non-member" | "unknown",
+    paymentMethod: "",
+    status: "Paid",
+    isPaid: true,
+    email: "",
+  });
+  const [addDraft, setAddDraft] = useState<LineEditDraft>(() => ({
+    packageProducts: Object.fromEntries(productKeys.map((k) => [k, "0"])),
+    subscriptionProducts: Object.fromEntries(productKeys.map((k) => [k, "0"])),
+    repurchaseProducts: Object.fromEntries(productKeys.map((k) => [k, "0"])),
+    subscriptionsCount: "0",
+    deliveryCategory: "pickup",
+    deliveryFee: "",
+    merchantFee: "",
+    totalAmount: "",
+    shippingFullName: "",
+    contactNumber: "",
+    shippingFullAddress: "",
+    province: "",
+    city: "",
+    region: "",
+    zipCode: "",
+    deliveryCourier: "",
+  }));
 
   const setPendingStatus = async (invoiceNumber: string) => {
     const row = rows.find((x) => x.invoiceNumber === invoiceNumber);
@@ -543,6 +578,103 @@ export default function OrdersPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingStatus("");
+    }
+  };
+
+  const openAddOrder = () => {
+    const baseDate = startDate || endDate || format(startOfDay(new Date()), "yyyy-MM-dd");
+    setAddBasic({
+      date: baseDate,
+      distributorId: "",
+      distributorName: "",
+      invoiceNumber: "",
+      orderDate: baseDate,
+      ordererName: "",
+      packageName: "",
+      packagePrice: "",
+      memberType: "unknown",
+      paymentMethod: "",
+      status: "Paid",
+      isPaid: true,
+      email: "",
+    });
+    setAddDraft({
+      packageProducts: Object.fromEntries(productKeys.map((k) => [k, "0"])),
+      subscriptionProducts: Object.fromEntries(productKeys.map((k) => [k, "0"])),
+      repurchaseProducts: Object.fromEntries(productKeys.map((k) => [k, "0"])),
+      subscriptionsCount: "0",
+      deliveryCategory: "pickup",
+      deliveryFee: "",
+      merchantFee: "",
+      totalAmount: "",
+      shippingFullName: "",
+      contactNumber: "",
+      shippingFullAddress: "",
+      province: "",
+      city: "",
+      region: "",
+      zipCode: "",
+      deliveryCourier: "",
+    });
+    setAddOpen(true);
+  };
+
+  const submitAddOrder = async () => {
+    const inv = addBasic.invoiceNumber.trim();
+    if (!inv || !/^\d{4}-\d{2}-\d{2}$/.test(addBasic.date)) return;
+    setAdding(true);
+    setError(null);
+    try {
+      const parseN = (s: string) => {
+        const x = Number(String(s).replace(/,/g, "").trim());
+        return Number.isFinite(x) ? x : 0;
+      };
+      const body: Record<string, unknown> = {
+        date: addBasic.date,
+        distributorId: addBasic.distributorId,
+        distributorName: addBasic.distributorName,
+        invoiceNumber: inv,
+        orderDate: addBasic.orderDate,
+        ordererName: addBasic.ordererName,
+        packageName: addBasic.packageName,
+        packagePrice: parseN(addBasic.packagePrice),
+        memberType: addBasic.memberType,
+        paymentMethod: addBasic.paymentMethod,
+        status: addBasic.status,
+        isPaid: addBasic.isPaid,
+        email: addBasic.email,
+        deliveryCategory: addDraft.deliveryCategory,
+        packageProducts: Object.fromEntries(productKeys.map((k) => [k, parseN(addDraft.packageProducts[k] ?? "0")])),
+        subscriptionProducts: Object.fromEntries(productKeys.map((k) => [k, parseN(addDraft.subscriptionProducts[k] ?? "0")])),
+        repurchaseProducts: Object.fromEntries(productKeys.map((k) => [k, parseN(addDraft.repurchaseProducts[k] ?? "0")])),
+        subscriptionsCount: Math.max(0, Math.floor(parseN(addDraft.subscriptionsCount))),
+        deliveryFee: parseN(addDraft.deliveryFee),
+        merchantFee: parseN(addDraft.merchantFee),
+        totalAmount: parseN(addDraft.totalAmount),
+        shippingFullName: addDraft.shippingFullName,
+        contactNumber: addDraft.contactNumber,
+        shippingFullAddress: addDraft.shippingFullAddress,
+        province: addDraft.province,
+        city: addDraft.city,
+        region: addDraft.region,
+        zipCode: addDraft.zipCode,
+        deliveryCourier: addDraft.deliveryCourier,
+      };
+      const res = await fetch("/api/admin/orders/manual", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await safeReadJson<{ ok?: boolean; error?: string }>(res);
+      if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
+      setAddOpen(false);
+      // Reload current view.
+      if (search.trim()) void refetchSearchRows();
+      else void refetchCompiledRows();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAdding(false);
     }
   };
 
@@ -729,6 +861,16 @@ export default function OrdersPage() {
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-3">
+          {canFullOrderEdit ? (
+            <button
+              type="button"
+              onClick={openAddOrder}
+              className="rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400"
+              title="Manually add an order to a specific date"
+            >
+              + Add order
+            </button>
+          ) : null}
           <div>
             <div className="text-xs font-semibold text-zinc-400">Status</div>
             <select
@@ -787,6 +929,150 @@ export default function OrdersPage() {
       {error ? (
         <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
           {error}
+        </div>
+      ) : null}
+
+      {addOpen ? (
+        <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-white">Add order</div>
+              <div className="mt-1 text-xs text-zinc-400">Creates a manual order row for the selected date.</div>
+            </div>
+            <button type="button" onClick={() => setAddOpen(false)} className="admin-btn-secondary px-3 py-2 text-xs">
+              Close
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="block text-xs text-zinc-400">
+              Date (import/effective)
+              <input
+                type="date"
+                value={addBasic.date}
+                onChange={(e) => setAddBasic((p) => ({ ...p, date: e.target.value }))}
+                className="admin-input mt-1 w-full"
+              />
+            </label>
+            <label className="block text-xs text-zinc-400">
+              Invoice #
+              <input
+                value={addBasic.invoiceNumber}
+                onChange={(e) => setAddBasic((p) => ({ ...p, invoiceNumber: e.target.value }))}
+                className="admin-input mt-1 w-full"
+              />
+            </label>
+            <label className="block text-xs text-zinc-400">
+              Distributor ID
+              <input
+                value={addBasic.distributorId}
+                onChange={(e) => setAddBasic((p) => ({ ...p, distributorId: e.target.value }))}
+                className="admin-input mt-1 w-full"
+              />
+            </label>
+            <label className="block text-xs text-zinc-400">
+              Distributor
+              <input
+                value={addBasic.distributorName}
+                onChange={(e) => setAddBasic((p) => ({ ...p, distributorName: e.target.value }))}
+                className="admin-input mt-1 w-full"
+              />
+            </label>
+            <label className="block text-xs text-zinc-400">
+              Order date (text)
+              <input
+                value={addBasic.orderDate}
+                onChange={(e) => setAddBasic((p) => ({ ...p, orderDate: e.target.value }))}
+                className="admin-input mt-1 w-full"
+              />
+            </label>
+            <label className="block text-xs text-zinc-400">
+              Orderer
+              <input
+                value={addBasic.ordererName}
+                onChange={(e) => setAddBasic((p) => ({ ...p, ordererName: e.target.value }))}
+                className="admin-input mt-1 w-full"
+              />
+            </label>
+            <label className="block text-xs text-zinc-400">
+              Package name
+              <input
+                value={addBasic.packageName}
+                onChange={(e) => setAddBasic((p) => ({ ...p, packageName: e.target.value }))}
+                className="admin-input mt-1 w-full"
+              />
+            </label>
+            <label className="block text-xs text-zinc-400">
+              Package price
+              <input
+                value={addBasic.packagePrice}
+                onChange={(e) => setAddBasic((p) => ({ ...p, packagePrice: e.target.value }))}
+                className="admin-input mt-1 w-full"
+                inputMode="decimal"
+              />
+            </label>
+            <label className="block text-xs text-zinc-400">
+              Member type
+              <select
+                value={addBasic.memberType}
+                onChange={(e) => setAddBasic((p) => ({ ...p, memberType: e.target.value as any }))}
+                className="admin-select mt-1 w-full"
+              >
+                <option value="unknown">Unknown</option>
+                <option value="member">Member</option>
+                <option value="non-member">Non-member</option>
+              </select>
+            </label>
+            <label className="block text-xs text-zinc-400">
+              Payment method
+              <input
+                value={addBasic.paymentMethod}
+                onChange={(e) => setAddBasic((p) => ({ ...p, paymentMethod: e.target.value }))}
+                className="admin-input mt-1 w-full"
+              />
+            </label>
+            <label className="block text-xs text-zinc-400">
+              Status
+              <input
+                value={addBasic.status}
+                onChange={(e) => setAddBasic((p) => ({ ...p, status: e.target.value }))}
+                className="admin-input mt-1 w-full"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-xs text-zinc-300">
+              <input
+                type="checkbox"
+                checked={addBasic.isPaid}
+                onChange={(e) => setAddBasic((p) => ({ ...p, isPaid: e.target.checked }))}
+                className="rounded border-white/20"
+              />
+              Paid
+            </label>
+            <label className="block text-xs text-zinc-400 lg:col-span-2">
+              Email
+              <input
+                value={addBasic.email}
+                onChange={(e) => setAddBasic((p) => ({ ...p, email: e.target.value }))}
+                className="admin-input mt-1 w-full"
+              />
+            </label>
+          </div>
+
+          <div className="mt-4">
+            <OrderLineEditForm
+              productKeys={productKeys}
+              draft={addDraft}
+              onChange={setAddDraft}
+              onSave={() => void submitAddOrder()}
+              onCancel={() => setAddOpen(false)}
+              saving={adding}
+              newEditMode={false}
+              claimDateValue=""
+              onClaimDateChange={() => {}}
+              effectiveDateValue=""
+              onEffectiveDateChange={() => {}}
+            />
+          </div>
         </div>
       ) : null}
 
