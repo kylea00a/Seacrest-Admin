@@ -16,10 +16,13 @@ export function syncAutoPickupClaimsFromCompiledRows(
     deliveryMethod?: unknown;
     status?: unknown;
     shippingFullAddress?: unknown;
+    /** Effective / import date (YYYY-MM-DD) — must not use “today” or orders look claimed today on page load. */
+    date?: unknown;
   }>,
 ): void {
   const claims = loadOrderClaims();
   let changed = false;
+  const now = new Date();
 
   for (const row of rows) {
     const inv =
@@ -41,10 +44,12 @@ export function syncAutoPickupClaimsFromCompiledRows(
         : "";
     if (!addr) continue;
 
-    const now = new Date();
+    const d = typeof row.date === "string" ? row.date.trim().slice(0, 10) : "";
+    const claimDate = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : calendarYmdInTimeZone(now, "Asia/Manila");
     claims[inv] = {
       claimedAt: now.toISOString(),
-      claimDate: calendarYmdInTimeZone(now, "Asia/Manila"),
+      claimDate,
+      claimDateExplicit: true,
     };
     changed = true;
   }
