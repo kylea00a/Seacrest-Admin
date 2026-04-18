@@ -371,13 +371,15 @@ export function parseOrdersWorkbook(buf: Buffer, opts?: ParseOrdersWorkbookOptio
     const status = idxStatus >= 0 ? normalizeText(row[idxStatus]) : "";
     const isPaid = paidFromStatus(status);
 
-    // Skip completely empty/irrelevant lines
+    // Skip completely empty/irrelevant lines (package row with name/price but no product breakdown counts)
     const any =
       sumBreakdown(packageProducts) > 0 ||
       sumBreakdown(subscriptionProducts) > 0 ||
       sumBreakdown(repurchaseProducts) > 0 ||
       subscriptionsCount > 0 ||
-      normalizeText(row[MEMBER_IDX]);
+      normalizeText(row[MEMBER_IDX]) ||
+      packagePrice > 0 ||
+      packageName !== "";
     if (!any) continue;
 
     rows.push({
@@ -423,7 +425,8 @@ export function parseOrdersWorkbook(buf: Buffer, opts?: ParseOrdersWorkbookOptio
     }
 
     const ok = !isOrderExcludedFromSuccessMetrics(status);
-    const hasPkg = sumBreakdown(packageProducts) > 0 || packagePrice > 0;
+    const hasPkg =
+      sumBreakdown(packageProducts) > 0 || packagePrice > 0 || packageName !== "";
     const hasSub = subscriptionsCount > 0 || sumBreakdown(subscriptionProducts) > 0;
     const hasRep = sumBreakdown(repurchaseProducts) > 0;
     if (ok && hasPkg) packageOrderCount++;
