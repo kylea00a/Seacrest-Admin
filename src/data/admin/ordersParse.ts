@@ -371,7 +371,29 @@ export function parseOrdersWorkbook(buf: Buffer, opts?: ParseOrdersWorkbookOptio
     const status = idxStatus >= 0 ? normalizeText(row[idxStatus]) : "";
     const isPaid = paidFromStatus(status);
 
-    // Skip completely empty/irrelevant lines (package row with name/price but no product breakdown counts)
+    // Skip completely empty/irrelevant lines — include rows with order-level fields even when all
+    // package / subscription / repurchase product breakdown columns are empty.
+    const hasOrderMetadata =
+      invoiceNumber !== "" ||
+      orderDate !== "" ||
+      ordererName !== "" ||
+      totalAmount > 0 ||
+      deliveryFee > 0 ||
+      merchantFee > 0 ||
+      status !== "" ||
+      paymentMethod !== "" ||
+      shippingFullName !== "" ||
+      contactNumber !== "" ||
+      email !== "" ||
+      shippingFullAddress !== "" ||
+      province !== "" ||
+      city !== "" ||
+      region !== "" ||
+      zipCode !== "" ||
+      deliveryMethod !== "" ||
+      deliveryCourier !== "" ||
+      distributorId !== "" ||
+      distributorName !== "";
     const any =
       sumBreakdown(packageProducts) > 0 ||
       sumBreakdown(subscriptionProducts) > 0 ||
@@ -379,7 +401,8 @@ export function parseOrdersWorkbook(buf: Buffer, opts?: ParseOrdersWorkbookOptio
       subscriptionsCount > 0 ||
       normalizeText(row[MEMBER_IDX]) ||
       packagePrice > 0 ||
-      packageName !== "";
+      packageName !== "" ||
+      hasOrderMetadata;
     if (!any) continue;
 
     rows.push({
