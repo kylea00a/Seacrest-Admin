@@ -368,6 +368,7 @@ export default function ImportOrdersPage() {
   const [selectedDates, setSelectedDates] = useState<Record<string, boolean>>({});
   const [deletingDate, setDeletingDate] = useState<string>("");
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
   const [savedPreviewDate, setSavedPreviewDate] = useState<string | null>(null);
   const [savedPreviewRows, setSavedPreviewRows] = useState<PreviewRow[]>([]);
   const [savedPreviewPage, setSavedPreviewPage] = useState(1);
@@ -602,6 +603,30 @@ export default function ImportOrdersPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBulkDeleting(false);
+    }
+  };
+
+  const deleteAllImports = async () => {
+    if (index.length === 0) return;
+    const ok = window.confirm(
+      `Delete all ${index.length} import day(s)? Every stored import will be removed from Sales Report and Delivery. This cannot be undone.`,
+    );
+    if (!ok) return;
+    setDeletingAll(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/orders?all=1", { method: "DELETE" });
+      const json = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
+      setSelectedDates({});
+      setSavedPreviewDate(null);
+      setSavedPreviewRows([]);
+      setSavedPreviewError(null);
+      await loadIndex();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeletingAll(false);
     }
   };
 
@@ -858,17 +883,25 @@ export default function ImportOrdersPage() {
               <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} />
               Select all (visible)
             </label>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <div className="text-xs text-zinc-400">
                 Selected: <span className="font-semibold text-zinc-200">{selectedList.length}</span>
               </div>
               <button
                 type="button"
                 onClick={() => void bulkDeleteSelected()}
-                disabled={bulkDeleting || selectedList.length === 0}
+                disabled={bulkDeleting || deletingAll || selectedList.length === 0}
                 className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-500/20 disabled:opacity-60"
               >
                 {bulkDeleting ? "Deleting…" : "Delete selected"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void deleteAllImports()}
+                disabled={bulkDeleting || deletingAll || index.length === 0}
+                className="rounded-xl border border-red-500/50 bg-red-950/40 px-3 py-1.5 text-xs font-semibold text-red-100 hover:bg-red-950/70 disabled:opacity-60"
+              >
+                {deletingAll ? "Deleting…" : "Delete all imports"}
               </button>
             </div>
           </div>

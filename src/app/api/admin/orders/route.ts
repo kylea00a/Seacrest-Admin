@@ -34,6 +34,8 @@ export async function DELETE(req: Request) {
   const url = new URL(req.url);
   const date = url.searchParams.get("date");
   const datesParam = url.searchParams.get("dates");
+  const deleteAll =
+    url.searchParams.get("all") === "1" || url.searchParams.get("all")?.toLowerCase() === "true";
   const dates =
     datesParam && datesParam.trim()
       ? datesParam
@@ -42,9 +44,16 @@ export async function DELETE(req: Request) {
           .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
       : [];
 
-  if (!date && dates.length === 0) return NextResponse.json({ error: "Missing `date` or `dates`." }, { status: 400 });
-
-  const targets = date ? [date] : Array.from(new Set(dates));
+  let targets: string[];
+  if (deleteAll) {
+    targets = Array.from(new Set(loadOrdersIndex().map((i) => i.date)));
+  } else if (date) {
+    targets = [date];
+  } else if (dates.length > 0) {
+    targets = Array.from(new Set(dates));
+  } else {
+    return NextResponse.json({ error: "Missing `date`, `dates`, or `all=1`." }, { status: 400 });
+  }
 
   const invoiceNumbers: string[] = [];
   let existedAny = false;
