@@ -171,7 +171,8 @@ export default function SalesReportPage() {
 
       dr.deliveryFee += deliveryFee;
 
-      // Repurchase amount using SRP, except chips have bulk pricing tiers (based on total chips qty per order).
+      // Repurchase amount should use members price, except chips have bulk pricing tiers
+      // (based on total chips qty per order).
       const rep = row["repurchaseProducts"] as ProductBreakdown | undefined;
       let repurchaseAmt = 0;
       if (rep && typeof rep === "object") {
@@ -196,7 +197,7 @@ export default function SalesReportPage() {
           const price =
             isChips && chipsTierPrice != null
               ? chipsTierPrice
-              : (productPriceByName.get(name)?.srp ?? 0);
+              : (productPriceByName.get(name)?.membersPrice ?? 0);
           const amt = qty * price;
           repurchaseAmt += amt;
         }
