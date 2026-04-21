@@ -184,3 +184,30 @@ export interface CashTransaction {
   depositedAt?: string;
 }
 
+/** One row from wallet transactions Excel import (balance column not stored). */
+export interface WalletTransactionRow {
+  /** Stable key for this row (Excel ID when present). */
+  id: string;
+  referenceNumber: string;
+  distributorId: string;
+  distributorName: string;
+  amount: number;
+  notes: string;
+  /** YYYY-MM-DD from Transaction date column. */
+  transactionDate: string;
+  updatedAt?: string;
+  /** Oldest→newest ordering: prefers full datetime from Updated at when parseable. */
+  sortTimeMs: number;
+}
+
+export interface WalletTransactionsFile {
+  importedAt: string;
+  filename: string;
+  rows: WalletTransactionRow[];
+}
+
+export interface WalletPayoutReceipt {
+  paid: boolean;
+  receiptNumber: string;
+}
+

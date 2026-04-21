@@ -36,6 +36,13 @@ const ALL_SECTIONS: DockSection[] = [
       { key: "departments", label: "Departments", href: "/admin/departments", perm: "departments" },
       { key: "petty", label: "Petty Cash", href: "/admin/petty-cash", perm: "pettyCash" },
       { key: "cash-balances", label: "Cash Balances", href: "/admin/cash-balances", perm: "pettyCash" },
+      {
+        key: "wallet-transactions",
+        label: "Wallet Transactions Import",
+        href: "/admin/wallet-transactions",
+        perm: "pettyCash",
+      },
+      { key: "payouts", label: "Payouts", href: "/admin/payouts", perm: "pettyCash" },
     ],
   },
   {
