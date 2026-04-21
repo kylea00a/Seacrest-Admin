@@ -5,6 +5,7 @@ import RightDock from "./_components/RightDock";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { adminPathToPermissionKey } from "@/data/admin/adminPermissions";
+import ServerHealthWidget from "./_components/ServerHealthWidget";
 
 const AUTH_PATHS = ["/admin/login", "/admin/setup", "/admin/forbidden"];
 
@@ -137,6 +138,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
         <div className="animate-fade-in">{children}</div>
       </div>
       <RightDock account={account} />
+      <ServerHealthWidget />
     </div>
   );
 }
