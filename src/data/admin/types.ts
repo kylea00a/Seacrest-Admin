@@ -93,7 +93,16 @@ export interface AdminPackageItem {
   name: string;
   /** Code in package label (e.g. Standard-P2996) for price matching. */
   code: string;
-  price: number;
+  /**
+   * Package price shown/used in Orders (often includes subscription portion for bundle packages).
+   * This is the basis for matching package names from an order's numeric package price.
+   */
+  packagePrice: number;
+  /**
+   * Affiliate package-alone price (excludes subscription portion).
+   * Sales Report package amount should use this value.
+   */
+  affiliatePrice: number;
   weight: number;
 }
 

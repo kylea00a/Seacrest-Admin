@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { BankAccount, CashTransaction } from "@/data/admin/types";
 import { format, startOfDay } from "date-fns";
+import { useAdminSession } from "../AdminSessionContext";
 
 function currency(n: number) {
   try {
@@ -23,6 +24,7 @@ async function safeReadJson<T>(res: Response): Promise<T> {
 }
 
 export default function CashBalancesPage() {
+  const { can } = useAdminSession();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
@@ -38,6 +40,7 @@ export default function CashBalancesPage() {
   const [customAmount, setCustomAmount] = useState("");
   const [customDesc, setCustomDesc] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string>("");
 
   const load = async () => {
     setLoading(true);
@@ -106,6 +109,30 @@ export default function CashBalancesPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const canDelete = can("pettyCashEdit");
+
+  const deleteTxn = async (id: string) => {
+    if (!canDelete) return;
+    const ok = window.confirm("Delete this transaction? This cannot be undone.");
+    if (!ok) return;
+    setDeletingId(id);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/cash", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "deleteTransaction", id }),
+      });
+      const json = await safeReadJson<{ ok?: boolean; error?: string }>(res);
+      if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeletingId("");
     }
   };
 
@@ -210,12 +237,13 @@ export default function CashBalancesPage() {
                 <th className="px-3 py-2 text-left">Description</th>
                 <th className="px-3 py-2 text-right whitespace-nowrap">Debit</th>
                 <th className="px-3 py-2 text-right whitespace-nowrap">Credit</th>
+                {canDelete ? <th className="px-3 py-2 text-right whitespace-nowrap">Edit</th> : null}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
               {visible.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-4 text-zinc-500" colSpan={4}>
+                  <td className="px-3 py-4 text-zinc-500" colSpan={canDelete ? 5 : 4}>
                     No transactions yet.
                   </td>
                 </tr>
@@ -226,6 +254,18 @@ export default function CashBalancesPage() {
                     <td className="px-3 py-2">{t.description}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-rose-300/90">{t.debit ? currency(t.debit) : ""}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-emerald-300/90">{t.credit ? currency(t.credit) : ""}</td>
+                    {canDelete ? (
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          type="button"
+                          onClick={() => void deleteTxn(t.id)}
+                          disabled={deletingId === t.id}
+                          className="admin-btn-secondary px-2 py-1 text-[11px] text-red-200 hover:bg-red-500/15 disabled:opacity-50"
+                        >
+                          {deletingId === t.id ? "Deleting…" : "Delete"}
+                        </button>
+                      </td>
+                    ) : null}
                   </tr>
                 ))
               )}

@@ -82,7 +82,13 @@ export default function PackagesProductsEditor({ standalone = true }: PackagesPr
   const [draftPackages, setDraftPackages] = useState<AdminPackageItem[]>([]);
 
   const [newProduct, setNewProduct] = useState({ name: "", membersPrice: "", srp: "", weight: "" });
-  const [newPkg, setNewPkg] = useState({ name: "", code: "", price: "", weight: "" });
+  const [newPkg, setNewPkg] = useState({
+    name: "",
+    code: "",
+    packagePrice: "",
+    affiliatePrice: "",
+    weight: "",
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -152,8 +158,8 @@ export default function PackagesProductsEditor({ standalone = true }: PackagesPr
   const savePackages = async () => {
     const codes = new Set<string>();
     for (const p of draftPackages) {
-      if (!p.name.trim() || !p.code.trim() || !Number.isFinite(p.price)) {
-        setError("Each package needs name, code, and a valid price.");
+      if (!p.name.trim() || !p.code.trim() || !Number.isFinite(p.packagePrice) || !Number.isFinite(p.affiliatePrice)) {
+        setError("Each package needs name, code, package price, and affiliate price.");
         return;
       }
       if (codes.has(p.code)) {
@@ -207,11 +213,13 @@ export default function PackagesProductsEditor({ standalone = true }: PackagesPr
 
   const addPackageRow = () => {
     const name = newPkg.name.trim();
-    const code = newPkg.code.trim() || `${name.replace(/\s+/g, "")}-P${newPkg.price}`.replace(/^-/, "");
-    const price = Number(newPkg.price);
+    const code =
+      newPkg.code.trim() || `${name.replace(/\s+/g, "")}-P${newPkg.packagePrice}`.replace(/^-/, "");
+    const packagePrice = Number(newPkg.packagePrice);
+    const affiliatePrice = Number(newPkg.affiliatePrice || newPkg.packagePrice);
     const weight = roundWeight2(parseFloat(newPkg.weight) || 0);
-    if (!name || !Number.isFinite(price)) {
-      setError("Package name and numeric price are required.");
+    if (!name || !Number.isFinite(packagePrice) || !Number.isFinite(affiliatePrice)) {
+      setError("Package name, numeric package price, and numeric affiliate price are required.");
       return;
     }
     if (draftPackages.some((p) => p.code === code)) {
@@ -223,11 +231,12 @@ export default function PackagesProductsEditor({ standalone = true }: PackagesPr
       {
         name,
         code,
-        price,
+        packagePrice,
+        affiliatePrice,
         weight,
       },
     ]);
-    setNewPkg({ name: "", code: "", price: "", weight: "" });
+    setNewPkg({ name: "", code: "", packagePrice: "", affiliatePrice: "", weight: "" });
     setError(null);
   };
 
@@ -248,7 +257,7 @@ export default function PackagesProductsEditor({ standalone = true }: PackagesPr
   const packageRowOrder = useMemo(() => {
     return draftPackages
       .map((p, i) => ({ i, p }))
-      .sort((a, b) => a.p.price - b.p.price)
+      .sort((a, b) => a.p.packagePrice - b.p.packagePrice)
       .map((x) => x.i);
   }, [draftPackages]);
 
@@ -396,7 +405,10 @@ export default function PackagesProductsEditor({ standalone = true }: PackagesPr
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="text-sm font-semibold">Packages</div>
-              <div className="mt-1 text-xs text-zinc-400">Name, price, weight; code is used to match package labels (e.g. Standard-P2996).</div>
+              <div className="mt-1 text-xs text-zinc-400">
+                Code is used to match package labels (e.g. Standard-P2996). Package price is the total shown in Orders;
+                affiliate price is the package-alone portion (Sales Report uses affiliate only).
+              </div>
             </div>
             <div className="text-xs text-zinc-400">{draftPackages.length} items</div>
           </div>
@@ -407,7 +419,8 @@ export default function PackagesProductsEditor({ standalone = true }: PackagesPr
                 <tr className="border-b border-white/[0.08] bg-zinc-950/80 text-xs font-semibold uppercase tracking-wide text-zinc-400">
                   <th className="px-3 py-2">Package name</th>
                   <th className="px-3 py-2">Code</th>
-                  <th className="px-3 py-2 text-right">Price</th>
+                  <th className="px-3 py-2 text-right">Price (package)</th>
+                  <th className="px-3 py-2 text-right">Price (affiliate)</th>
                   <th className="px-3 py-2 text-right">Weight</th>
                   <th className="px-3 py-2 text-right"> </th>
                 </tr>
@@ -434,8 +447,16 @@ export default function PackagesProductsEditor({ standalone = true }: PackagesPr
                       </td>
                       <td className="px-3 py-2 align-middle">
                         <input
-                          value={moneyStr(p.price)}
-                          onChange={(e) => updatePackage(index, { price: Number(e.target.value) || 0 })}
+                          value={moneyStr(p.packagePrice)}
+                          onChange={(e) => updatePackage(index, { packagePrice: Number(e.target.value) || 0 })}
+                          inputMode="decimal"
+                          className="admin-input w-full text-right"
+                        />
+                      </td>
+                      <td className="px-3 py-2 align-middle">
+                        <input
+                          value={moneyStr(p.affiliatePrice)}
+                          onChange={(e) => updatePackage(index, { affiliatePrice: Number(e.target.value) || 0 })}
                           inputMode="decimal"
                           className="admin-input w-full text-right"
                         />
@@ -464,7 +485,7 @@ export default function PackagesProductsEditor({ standalone = true }: PackagesPr
             </table>
           </div>
 
-          <div className="mt-4 grid gap-2 border-t border-white/[0.06] pt-4 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="mt-4 grid gap-2 border-t border-white/[0.06] pt-4 sm:grid-cols-2 lg:grid-cols-6">
             <input
               value={newPkg.name}
               onChange={(e) => setNewPkg((x) => ({ ...x, name: e.target.value }))}
@@ -478,11 +499,18 @@ export default function PackagesProductsEditor({ standalone = true }: PackagesPr
               placeholder="Code (optional)"
             />
             <input
-              value={newPkg.price}
-              onChange={(e) => setNewPkg((x) => ({ ...x, price: e.target.value }))}
+              value={newPkg.packagePrice}
+              onChange={(e) => setNewPkg((x) => ({ ...x, packagePrice: e.target.value }))}
               inputMode="decimal"
               className="admin-input"
-              placeholder="Price"
+              placeholder="Price (package)"
+            />
+            <input
+              value={newPkg.affiliatePrice}
+              onChange={(e) => setNewPkg((x) => ({ ...x, affiliatePrice: e.target.value }))}
+              inputMode="decimal"
+              className="admin-input"
+              placeholder="Price (affiliate)"
             />
             <input
               value={newPkg.weight}

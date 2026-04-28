@@ -48,6 +48,9 @@ export async function POST(req: Request) {
   } else if (action === "addTransaction") {
     const auth = await requireApiPermission(req, "pettyCash");
     if (auth instanceof NextResponse) return auth;
+  } else if (action === "deleteTransaction") {
+    const auth = await requireApiPermission(req, "pettyCashEdit");
+    if (auth instanceof NextResponse) return auth;
   } else {
     return NextResponse.json({ error: "Missing/invalid `action`." }, { status: 400 });
   }
@@ -119,6 +122,16 @@ export async function POST(req: Request) {
     file.transactions.unshift(tx);
     saveCashLedger(file);
     return NextResponse.json({ ok: true, tx, file });
+  }
+
+  if (action === "deleteTransaction") {
+    const id = typeof body.id === "string" ? body.id.trim() : "";
+    if (!id) return NextResponse.json({ error: "Missing `id`." }, { status: 400 });
+    const idx = file.transactions.findIndex((t) => t.id === id);
+    if (idx < 0) return NextResponse.json({ error: "Transaction not found." }, { status: 404 });
+    const [deleted] = file.transactions.splice(idx, 1);
+    saveCashLedger(file);
+    return NextResponse.json({ ok: true, deleted, file });
   }
 
   if (action === "depositSalesDay" || action === "undoDepositSalesDay") {

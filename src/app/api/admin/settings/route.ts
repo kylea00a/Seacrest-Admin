@@ -56,18 +56,38 @@ function normalizeProducts(v: unknown): AdminProductItem[] {
   return out.filter((p) => (seen.has(p.name) ? false : (seen.add(p.name), true)));
 }
 
-function normalizePackages(v: unknown): Array<{ name: string; code: string; price: number; weight: number }> {
+function normalizePackages(
+  v: unknown,
+): Array<{ name: string; code: string; packagePrice: number; affiliatePrice: number; weight: number }> {
   if (!Array.isArray(v)) return [];
-  const out: Array<{ name: string; code: string; price: number; weight: number }> = [];
+  const out: Array<{ name: string; code: string; packagePrice: number; affiliatePrice: number; weight: number }> = [];
   for (const item of v) {
     if (!item || typeof item !== "object") continue;
     const rec = item as Record<string, unknown>;
     const name = typeof rec.name === "string" ? rec.name.trim() : "";
     const code = typeof rec.code === "string" ? rec.code.trim() : "";
-    const priceRaw = rec.price;
-    const price = typeof priceRaw === "number" ? priceRaw : typeof priceRaw === "string" ? Number(priceRaw) : NaN;
-    if (!name || !code || !Number.isFinite(price)) continue;
-    out.push({ name, code, price, weight: roundWeight2(numField(rec.weight)) });
+    const packagePriceRaw = rec.packagePrice ?? rec.price;
+    const affiliatePriceRaw = rec.affiliatePrice ?? rec.price ?? rec.packagePrice;
+    const packagePrice =
+      typeof packagePriceRaw === "number"
+        ? packagePriceRaw
+        : typeof packagePriceRaw === "string"
+          ? Number(packagePriceRaw)
+          : NaN;
+    const affiliatePrice =
+      typeof affiliatePriceRaw === "number"
+        ? affiliatePriceRaw
+        : typeof affiliatePriceRaw === "string"
+          ? Number(affiliatePriceRaw)
+          : NaN;
+    if (!name || !code || !Number.isFinite(packagePrice) || !Number.isFinite(affiliatePrice)) continue;
+    out.push({
+      name,
+      code,
+      packagePrice,
+      affiliatePrice,
+      weight: roundWeight2(numField(rec.weight)),
+    });
   }
   const seen = new Set<string>();
   return out.filter((p) => (seen.has(p.code) ? false : (seen.add(p.code), true)));

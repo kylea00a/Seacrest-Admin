@@ -119,6 +119,16 @@ export default function SalesReportPage() {
     return map;
   }, [settings]);
 
+  const affiliatePriceByPackagePrice = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const p of settings?.packages ?? []) {
+      if (!Number.isFinite(p.packagePrice) || p.packagePrice <= 0) continue;
+      const aff = Number.isFinite(p.affiliatePrice) && p.affiliatePrice > 0 ? p.affiliatePrice : p.packagePrice;
+      map.set(p.packagePrice, aff);
+    }
+    return map;
+  }, [settings]);
+
   type DailyRow = {
     date: string;
     packageAmount: number;
@@ -204,8 +214,11 @@ export default function SalesReportPage() {
       }
       dr.repurchaseTotal += repurchaseAmt;
 
-      // Package revenue: use packagePrice when present.
-      if (packagePrice > 0) dr.packageAmount += packagePrice;
+      // Package revenue: use affiliate price (package-alone) when mapping exists; fallback to packagePrice.
+      if (packagePrice > 0) {
+        const affiliate = affiliatePriceByPackagePrice.get(packagePrice) ?? packagePrice;
+        dr.packageAmount += affiliate;
+      }
 
       // Subscription amount: per spec, use (successful subscription count on that day) × 498.
       // This is based on the order's effective/import date (same Date shown in All Orders), not claim date.
@@ -215,7 +228,7 @@ export default function SalesReportPage() {
 
     // Oldest → latest (top-down)
     return Array.from(out.values()).sort((a, b) => a.date.localeCompare(b.date));
-  }, [rows, settings, productPriceByName]);
+  }, [rows, settings, productPriceByName, affiliatePriceByPackagePrice]);
 
   const monthTotals = useMemo(() => {
     let pkg = 0;

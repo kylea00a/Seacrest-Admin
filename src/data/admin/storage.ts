@@ -127,9 +127,21 @@ function migratePackages(raw: unknown, fallback: AdminPackageItem[]): AdminPacka
     const o = item as Record<string, unknown>;
     const name = typeof o.name === "string" ? o.name.trim() : "";
     const code = typeof o.code === "string" ? o.code.trim() : "";
-    const price = num(o.price, NaN);
-    if (!name || !code || !Number.isFinite(price)) continue;
-    out.push({ name, code, price, weight: roundWeight2(num(o.weight)) });
+    // Backwards compat: older settings stored `price` (treated as packagePrice) without affiliatePrice.
+    const legacyPrice = num(o.price, NaN);
+    const packagePrice = num(o.packagePrice, Number.isFinite(legacyPrice) ? legacyPrice : NaN);
+    const affiliatePrice = num(
+      o.affiliatePrice,
+      Number.isFinite(packagePrice) ? packagePrice : NaN,
+    );
+    if (!name || !code || !Number.isFinite(packagePrice) || !Number.isFinite(affiliatePrice)) continue;
+    out.push({
+      name,
+      code,
+      packagePrice,
+      affiliatePrice,
+      weight: roundWeight2(num(o.weight)),
+    });
   }
   return out.length ? out : fallback;
 }
@@ -139,10 +151,10 @@ export function loadAdminSettings(): AdminSettings {
     expenseCategories: ["BIR", "Rent", "Utility", "Maintenance", "Payroll", "Supplies", "Other"],
     pettyCashCategories: ["Miscellaneous"],
     packages: [
-      { name: "Starter", code: "Starter-P998", price: 998, weight: 0 },
-      { name: "Standard", code: "Standard-P2996", price: 2996, weight: 0 },
-      { name: "Premium", code: "Premium-P5996", price: 5996, weight: 0 },
-      { name: "VIP", code: "VIP-P9996", price: 9996, weight: 0 },
+      { name: "Starter", code: "Starter-P998", packagePrice: 998, affiliatePrice: 998, weight: 0 },
+      { name: "Standard", code: "Standard-P2996", packagePrice: 2996, affiliatePrice: 2996, weight: 0 },
+      { name: "Premium", code: "Premium-P5996", packagePrice: 5996, affiliatePrice: 5996, weight: 0 },
+      { name: "VIP", code: "VIP-P9996", packagePrice: 9996, affiliatePrice: 9996, weight: 0 },
     ],
     products: [
       { name: "Soap", membersPrice: 0, srp: 0, weight: 0 },
