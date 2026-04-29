@@ -53,9 +53,25 @@ export async function buildJntExpressWorkbookBuffer(rows: JntExportRow[]): Promi
     width: i === 2 ? 42 : i === 1 ? 18 : 14,
   }));
 
-  const headerRow = ws.addRow([...JNT_TEMPLATE_HEADERS]);
+  // Template header area (rows 1–7) — hidden in the export.
+  // Row 3: C3 = "PH GLOBAL JET EXPRESS INC."
+  // Row 6: A6 = "V20200721", E6 = "ORDER LIST"
+  // Row 7: A7 = "(*) Information that must be filled out"
+  ws.getCell("C3").value = "PH GLOBAL JET EXPRESS INC.";
+  ws.getCell("A6").value = "V20200721";
+  ws.getCell("E6").value = "ORDER LIST";
+  ws.getCell("A7").value = "(*) Information that must be filled out";
+
+  // Hide rows 1–7.
+  for (let r = 1; r <= 7; r++) ws.getRow(r).hidden = true;
+
+  // Column titles start at row 8.
+  const headerRow = ws.getRow(8);
+  headerRow.values = ["", ...JNT_TEMPLATE_HEADERS];
   headerRow.height = 22;
   headerRow.eachCell((cell, col) => {
+    // Row# in exceljs headerRow includes column 1..N; col 1 is blank from `.values`.
+    if (col === 1) return;
     cell.font = { bold: true, color: { argb: "FF000000" } };
     cell.fill = {
       type: "pattern",

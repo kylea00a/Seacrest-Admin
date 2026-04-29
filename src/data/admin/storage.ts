@@ -14,6 +14,8 @@ import type {
   OrdersImportSummary,
   PettyCashRequest,
   PettyCashState,
+  PettyCashLedgerTransaction,
+  Reminder,
 } from "./types";
 
 const PROJECT_ROOT = process.cwd();
@@ -23,6 +25,7 @@ const DEPARTMENTS_FILE = path.join(ADMIN_DATA_DIR, "departments.json");
 const EXPENSES_FILE = path.join(ADMIN_DATA_DIR, "expenses.json");
 const PETTY_CASH_STATE_FILE = path.join(ADMIN_DATA_DIR, "pettyCash.json");
 const PETTY_CASH_REQUESTS_FILE = path.join(ADMIN_DATA_DIR, "pettyCashRequests.json");
+const PETTY_CASH_LEDGER_FILE = path.join(ADMIN_DATA_DIR, "pettyCashLedger.json");
 const SETTINGS_FILE = path.join(ADMIN_DATA_DIR, "settings.json");
 const ORDERS_INDEX_FILE = path.join(ADMIN_DATA_DIR, "ordersIndex.json");
 const DELIVERY_TRACKING_FILE = path.join(ADMIN_DATA_DIR, "deliveryTracking.json");
@@ -31,6 +34,7 @@ const ORDER_CLAIMS_FILE = path.join(ADMIN_DATA_DIR, "orderClaims.json");
 const INVENTORY_SUPPLY_FILE = path.join(ADMIN_DATA_DIR, "inventorySupply.json");
 const INVENTORY_ENDING_FILE = path.join(ADMIN_DATA_DIR, "inventoryEnding.json");
 const CASH_LEDGER_FILE = path.join(ADMIN_DATA_DIR, "cashLedger.json");
+const REMINDERS_FILE = path.join(ADMIN_DATA_DIR, "reminders.json");
 
 function ensureAdminDir() {
   if (!fs.existsSync(ADMIN_DATA_DIR)) fs.mkdirSync(ADMIN_DATA_DIR, { recursive: true });
@@ -68,6 +72,14 @@ export function saveExpenses(expenses: Expense[]) {
   writeJsonFile(EXPENSES_FILE, expenses);
 }
 
+export function loadReminders(): Reminder[] {
+  return readJsonFile<Reminder[]>(REMINDERS_FILE, []);
+}
+
+export function saveReminders(reminders: Reminder[]) {
+  writeJsonFile(REMINDERS_FILE, reminders);
+}
+
 export function loadPettyCashState(): PettyCashState {
   return readJsonFile<PettyCashState>(PETTY_CASH_STATE_FILE, {
     balance: 0,
@@ -85,6 +97,14 @@ export function loadPettyCashRequests(): PettyCashRequest[] {
 
 export function savePettyCashRequests(requests: PettyCashRequest[]) {
   writeJsonFile(PETTY_CASH_REQUESTS_FILE, requests);
+}
+
+export function loadPettyCashLedger(): PettyCashLedgerTransaction[] {
+  return readJsonFile<PettyCashLedgerTransaction[]>(PETTY_CASH_LEDGER_FILE, []);
+}
+
+export function savePettyCashLedger(txns: PettyCashLedgerTransaction[]) {
+  writeJsonFile(PETTY_CASH_LEDGER_FILE, txns);
 }
 
 function num(v: unknown, fallback = 0): number {

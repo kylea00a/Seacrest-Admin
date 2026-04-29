@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { AdminSettings, PettyCashRequest, PettyCashState, UserRole } from "@/data/admin/types";
+import type {
+  AdminSettings,
+  PettyCashLedgerTransaction,
+  PettyCashRequest,
+  PettyCashState,
+  UserRole,
+} from "@/data/admin/types";
+import { useAdminSession } from "../AdminSessionContext";
 
 function todayISO() {
   const d = new Date();
@@ -26,11 +33,13 @@ function pill(status: string) {
 }
 
 export default function PettyCashPage() {
+  const { account, can } = useAdminSession();
   const [role, setRole] = useState<UserRole>("employee");
   const [employeeName, setEmployeeName] = useState("Employee");
 
   const [state, setState] = useState<PettyCashState | null>(null);
   const [requests, setRequests] = useState<PettyCashRequest[]>([]);
+  const [ledger, setLedger] = useState<PettyCashLedgerTransaction[]>([]);
   const [settings, setSettings] = useState<AdminSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,9 +48,11 @@ export default function PettyCashPage() {
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [dateRequested, setDateRequested] = useState(todayISO());
+  const [requestType, setRequestType] = useState<"budget" | "cashIn">("budget");
 
   const [balanceInput, setBalanceInput] = useState<string>("0");
   const availableBalance = state?.balance ?? 0;
+  const canEdit = can("pettyCashEdit") || account?.isSuperadmin;
 
   const load = async () => {
     setLoading(true);
@@ -53,6 +64,7 @@ export default function PettyCashPage() {
       ]);
 
       const json = (await pettyRes.json()) as { state?: PettyCashState; requests?: PettyCashRequest[]; error?: string };
+      const ledgerAny = (json as unknown as { ledger?: PettyCashLedgerTransaction[] }).ledger;
       const settingsJson = (await settingsRes.json()) as { settings?: AdminSettings; error?: string };
 
       if (!pettyRes.ok) throw new Error(json.error ?? `Failed with status ${pettyRes.status}`);
@@ -60,6 +72,7 @@ export default function PettyCashPage() {
 
       setState(json.state ?? null);
       setRequests(json.requests ?? []);
+      setLedger(Array.isArray(ledgerAny) ? ledgerAny : []);
       setSettings(settingsJson.settings ?? null);
       setBalanceInput(String(json.state?.balance ?? 0));
     } catch (e) {
@@ -79,7 +92,9 @@ export default function PettyCashPage() {
     const amt = Number(amount);
     if (!description.trim()) return setError("Description is required.");
     if (!Number.isFinite(amt) || amt <= 0) return setError("Amount must be greater than 0.");
-    if (amt > availableBalance) return setError(`Insufficient balance. Available: ${currency(availableBalance)}`);
+    if (requestType === "budget" && amt > availableBalance) {
+      return setError(`Insufficient balance. Available: ${currency(availableBalance)}`);
+    }
 
     const res = await fetch("/api/admin/petty-cash?action=request", {
       method: "POST",
@@ -90,6 +105,7 @@ export default function PettyCashPage() {
         description: description.trim(),
         amount: amt,
         dateRequested,
+        requestType,
       }),
     });
     const json = (await res.json()) as { request?: PettyCashRequest; state?: PettyCashState; error?: string; availableBalance?: number };
@@ -107,7 +123,7 @@ export default function PettyCashPage() {
     const res = await fetch("/api/admin/petty-cash?action=decide", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId, action, decidedBy: "Superadmin" }),
+      body: JSON.stringify({ requestId, action, decidedBy: account?.displayName ?? "Superadmin" }),
     });
     const json = (await res.json()) as { request?: PettyCashRequest; state?: PettyCashState; error?: string; availableBalance?: number };
     if (!res.ok) {
@@ -137,7 +153,72 @@ export default function PettyCashPage() {
     setState(json.state ?? null);
   };
 
+  const deleteLedger = async (id: string) => {
+    const ok = window.confirm("Delete this SOA entry?");
+    if (!ok) return;
+    setError(null);
+    const res = await fetch("/api/admin/petty-cash?action=delete-ledger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    const json = (await res.json()) as { ok?: boolean; error?: string };
+    if (!res.ok) {
+      setError(json.error ?? "Failed to delete SOA entry.");
+      return;
+    }
+    await load();
+  };
+
+  const editLedger = async (id: string) => {
+    const row = ledger.find((t) => t.id === id);
+    if (!row) return;
+    const nextDate = window.prompt("Date (YYYY-MM-DD)", row.date) ?? "";
+    if (!nextDate.trim()) return;
+    const nextDesc = window.prompt("Description", row.description) ?? "";
+    if (!nextDesc.trim()) return;
+    const nextCat = window.prompt("Category (optional)", row.category ?? "") ?? "";
+    const nextDebit = window.prompt("Debit (0 if none)", String(row.debit ?? 0)) ?? "";
+    const nextCredit = window.prompt("Credit (0 if none)", String(row.credit ?? 0)) ?? "";
+    const debit = Number(nextDebit);
+    const credit = Number(nextCredit);
+    if (!Number.isFinite(debit) || debit < 0) return setError("Debit must be a valid number (>= 0).");
+    if (!Number.isFinite(credit) || credit < 0) return setError("Credit must be a valid number (>= 0).");
+    if (debit <= 0 && credit <= 0) return setError("Either debit or credit must be > 0.");
+
+    setError(null);
+    const res = await fetch("/api/admin/petty-cash?action=edit-ledger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id,
+        date: nextDate.trim(),
+        description: nextDesc.trim(),
+        category: nextCat.trim() || undefined,
+        debit,
+        credit,
+      }),
+    });
+    const json = (await res.json()) as { ok?: boolean; error?: string };
+    if (!res.ok) {
+      setError(json.error ?? "Failed to edit SOA entry.");
+      return;
+    }
+    await load();
+  };
+
   const pending = useMemo(() => requests.filter((r) => r.status === "pending"), [requests]);
+
+  const soa = useMemo(() => {
+    const list = [...ledger].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
+    let b = 0;
+    const withBal = list.map((t) => {
+      b += (t.credit ?? 0) - (t.debit ?? 0);
+      return { ...t, runningBalance: b };
+    });
+    // Display latest first
+    return withBal.sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+  }, [ledger]);
   const pettyCategories = useMemo(() => {
     const list = settings?.pettyCashCategories?.length ? settings.pettyCashCategories : ["Miscellaneous"];
     return Array.from(new Set(list.map((s) => s.trim()).filter(Boolean)));
@@ -199,9 +280,21 @@ export default function PettyCashPage() {
 
         {role === "employee" && (
           <form onSubmit={createRequest} className="mt-6 space-y-4">
-            <div className="text-sm font-semibold">Request Budget</div>
+            <div className="text-sm font-semibold">Request</div>
 
             <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="text-sm font-semibold">Type</label>
+                <select
+                  value={requestType}
+                  onChange={(e) => setRequestType(e.target.value as "budget" | "cashIn")}
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500/60"
+                  required
+                >
+                  <option value="budget">Budget (Cash Out)</option>
+                  <option value="cashIn">Cash In</option>
+                </select>
+              </div>
               <div>
                 <label className="text-sm font-semibold">Category</label>
                 <select
@@ -251,7 +344,7 @@ export default function PettyCashPage() {
                   required
                 />
                 <div className="mt-1 text-xs text-zinc-400">
-                  Available: {currency(availableBalance)}
+                  {requestType === "budget" ? <>Available: {currency(availableBalance)}</> : "Adds to petty cash once approved."}
                 </div>
               </div>
             </div>
@@ -260,7 +353,7 @@ export default function PettyCashPage() {
               type="submit"
               className="rounded-xl bg-pink-500 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-pink-500/20 hover:bg-pink-400"
             >
-              Submit Request
+              Submit
             </button>
           </form>
         )}
@@ -324,7 +417,7 @@ export default function PettyCashPage() {
                           onClick={() => decide(r.id, "approve")}
                           className="rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400"
                         >
-                          Approve (deduct)
+                          Approve ({(r.requestType ?? "budget") === "cashIn" ? "cash in" : "deduct"})
                         </button>
                         <button
                           type="button"
@@ -344,6 +437,72 @@ export default function PettyCashPage() {
             </div>
           </div>
         )}
+
+        <div className="mt-8 rounded-2xl border border-white/10 bg-black/20 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-zinc-200">SOA</div>
+              <div className="mt-1 text-xs text-zinc-500">Latest first • running balance per row</div>
+            </div>
+            <div className="text-xs font-semibold text-zinc-400">{soa.length} entries</div>
+          </div>
+
+          <div className="admin-table-wrap mt-3 overflow-x-auto">
+            <table className="min-w-[860px] text-xs">
+              <thead className="bg-black/30 text-zinc-300">
+                <tr>
+                  <th className="px-3 py-2 text-left whitespace-nowrap">Date</th>
+                  <th className="px-3 py-2 text-left">Description</th>
+                  <th className="px-3 py-2 text-right whitespace-nowrap">Debit</th>
+                  <th className="px-3 py-2 text-right whitespace-nowrap">Credit</th>
+                  <th className="px-3 py-2 text-right whitespace-nowrap">Balance</th>
+                  {canEdit ? <th className="px-3 py-2 text-right whitespace-nowrap">Actions</th> : null}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/10">
+                {soa.length === 0 ? (
+                  <tr>
+                    <td className="px-3 py-4 text-zinc-500" colSpan={canEdit ? 6 : 5}>
+                      No SOA entries yet.
+                    </td>
+                  </tr>
+                ) : (
+                  soa.slice(0, 150).map((t) => (
+                    <tr key={t.id} className="bg-black/10 text-zinc-100">
+                      <td className="px-3 py-2 whitespace-nowrap text-zinc-300">{t.date}</td>
+                      <td className="px-3 py-2">{t.description}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-rose-300/90">{t.debit ? currency(t.debit) : ""}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-emerald-300/90">{t.credit ? currency(t.credit) : ""}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-zinc-200">
+                        {currency(t.runningBalance).replace(".00", "")}
+                      </td>
+                      {canEdit ? (
+                        <td className="px-3 py-2 text-right">
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void editLedger(t.id)}
+                              className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-white/10"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void deleteLedger(t.id)}
+                              className="rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] font-semibold text-red-200 hover:bg-red-500/20"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      ) : null}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
       <div className="admin-card">

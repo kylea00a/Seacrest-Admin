@@ -70,6 +70,21 @@ export default function CashBalancesPage() {
     return [...list].sort((a, b) => (b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)));
   }, [txns, accountId]);
 
+  const balanceByTxnId = useMemo(() => {
+    if (!accountId) return new Map<string, number>();
+    const list = txns
+      .filter((t) => t.accountId === accountId)
+      // Oldest → newest for running balance computation
+      .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
+    const map = new Map<string, number>();
+    let b = 0;
+    for (const t of list) {
+      b += (t.credit ?? 0) - (t.debit ?? 0);
+      map.set(t.id, b);
+    }
+    return map;
+  }, [txns, accountId]);
+
   const totalPages = useMemo(() => Math.max(1, Math.ceil(filtered.length / rowsPerPage)), [filtered.length, rowsPerPage]);
 
   useEffect(() => {
@@ -237,13 +252,14 @@ export default function CashBalancesPage() {
                 <th className="px-3 py-2 text-left">Description</th>
                 <th className="px-3 py-2 text-right whitespace-nowrap">Debit</th>
                 <th className="px-3 py-2 text-right whitespace-nowrap">Credit</th>
+                <th className="px-3 py-2 text-right whitespace-nowrap">Balance</th>
                 {canDelete ? <th className="px-3 py-2 text-right whitespace-nowrap">Edit</th> : null}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
               {visible.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-4 text-zinc-500" colSpan={canDelete ? 5 : 4}>
+                  <td className="px-3 py-4 text-zinc-500" colSpan={canDelete ? 6 : 5}>
                     No transactions yet.
                   </td>
                 </tr>
@@ -254,6 +270,9 @@ export default function CashBalancesPage() {
                     <td className="px-3 py-2">{t.description}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-rose-300/90">{t.debit ? currency(t.debit) : ""}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-emerald-300/90">{t.credit ? currency(t.credit) : ""}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-zinc-200">
+                      {balanceByTxnId.has(t.id) ? currency(balanceByTxnId.get(t.id) ?? 0) : ""}
+                    </td>
                     {canDelete ? (
                       <td className="px-3 py-2 text-right">
                         <button

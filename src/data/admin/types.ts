@@ -58,9 +58,24 @@ export interface CalendarEvent {
   departmentName: string;
   frequency: ExpenseFrequency;
   paymentStatus: PaymentStatus;
+  /** bill (expense) vs reminder vs petty cash request shown on calendar */
+  kind?: "bill" | "reminder" | "pettyCash";
+}
+
+export interface Reminder {
+  id: string;
+  title: string;
+  frequency: ExpenseFrequency;
+  startDate: string; // YYYY-MM-DD
+  repeatEveryMonths?: number;
+  repeatCount?: number;
+  notes?: string;
+  createdAt: string; // ISO
 }
 
 export type PettyCashRequestStatus = "pending" | "approved" | "rejected";
+
+export type PettyCashRequestType = "budget" | "cashIn";
 
 export interface PettyCashRequest {
   id: string;
@@ -69,6 +84,8 @@ export interface PettyCashRequest {
   description: string; // e.g. Battery
   amount: number;
   dateRequested: string; // YYYY-MM-DD
+  /** Budget = cash out; cashIn = cash added to petty cash. */
+  requestType?: PettyCashRequestType;
   status: PettyCashRequestStatus;
   createdAt: string; // ISO
   decidedAt?: string; // ISO
@@ -78,6 +95,25 @@ export interface PettyCashRequest {
 export interface PettyCashState {
   balance: number;
   updatedAt: string; // ISO
+}
+
+export type PettyCashLedgerKind = "budget_out" | "cash_in" | "bill_payment" | "adjustment";
+
+export interface PettyCashLedgerTransaction {
+  id: string;
+  /** YYYY-MM-DD (approval date for requests) */
+  date: string;
+  description: string;
+  category?: string;
+  debit: number;
+  credit: number;
+  kind: PettyCashLedgerKind;
+  /** Optional link back to request/expense */
+  requestId?: string;
+  expenseId?: string;
+  approvedBy?: string;
+  approvedAt?: string; // ISO
+  createdAt: string; // ISO
 }
 
 /** One sellable product — name matches Excel / order columns; prices & weight are reference fields. */
@@ -186,11 +222,13 @@ export interface CashTransaction {
   credit: number;
   createdAt: string; // ISO
   /** Optional classification for idempotency / UI toggles. */
-  kind?: "sales_deposit" | "custom";
+  kind?: "sales_deposit" | "custom" | "bill_payment";
   /** When kind = sales_deposit, the sales day being deposited (YYYY-MM-DD). */
   salesDate?: string;
   /** When kind = sales_deposit, the calendar day it was marked deposited (YYYY-MM-DD). */
   depositedAt?: string;
+  /** When kind = bill_payment, the expense id being paid. */
+  expenseId?: string;
 }
 
 /** One row from wallet transactions Excel import (balance column not stored). */

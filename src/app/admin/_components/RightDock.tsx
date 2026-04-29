@@ -26,7 +26,10 @@ const ALL_SECTIONS: DockSection[] = [
   {
     key: "home",
     label: "Home",
-    links: [{ key: "home", label: "Home", href: "/admin/calendar", perm: "calendar" }],
+    links: [
+      { key: "home", label: "Home", href: "/admin/calendar", perm: "calendar" },
+      { key: "reminders", label: "Reminders", href: "/admin/reminders", perm: "calendar" },
+    ],
   },
   {
     key: "finance",

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { loadDepartments, loadExpenses, loadInventoryEnding } from "@/data/admin/storage";
+import { loadDepartments, loadExpenses, loadInventoryEnding, loadPettyCashRequests, loadReminders } from "@/data/admin/storage";
 import { buildCalendarEventsForMonth } from "@/data/admin/calendar";
 import { requireApiPermission } from "@/lib/adminApiAuth";
 
@@ -22,13 +22,21 @@ export async function GET(req: Request) {
 
   const departments = loadDepartments();
   const expenses = loadExpenses();
+  const reminders = loadReminders();
+  const petty = loadPettyCashRequests();
 
   const monthStart = new Date(year, month - 1, 1);
   const { events, monthStart: monthStartISO, monthEnd } = buildCalendarEventsForMonth({
     expenses,
+    reminders,
     departments,
     monthStart,
   });
+
+  const pettyPending = petty
+    .filter((r) => r.status === "pending")
+    .filter((r) => r.dateRequested >= monthStartISO && r.dateRequested <= monthEnd)
+    .sort((a, b) => a.dateRequested.localeCompare(b.dateRequested));
 
   const inv = loadInventoryEnding();
   const inventoryDiscrepancyDates = Object.values(inv.byDate ?? {})
@@ -37,6 +45,6 @@ export async function GET(req: Request) {
     .filter((d) => d >= monthStartISO && d <= monthEnd)
     .sort((a, b) => a.localeCompare(b));
 
-  return NextResponse.json({ events, monthStart: monthStartISO, monthEnd, inventoryDiscrepancyDates });
+  return NextResponse.json({ events, monthStart: monthStartISO, monthEnd, inventoryDiscrepancyDates, pettyPending });
 }
 

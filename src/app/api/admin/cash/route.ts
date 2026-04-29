@@ -29,7 +29,7 @@ function num(v: unknown): number {
 }
 
 export async function GET(req: Request) {
-  const auth = await requireApiAnyPermission(req, ["pettyCash", "settings", "salesReport"]);
+  const auth = await requireApiAnyPermission(req, ["pettyCash", "pettyCashEdit", "settings", "salesReport", "calendar", "expenses"]);
   if (auth instanceof NextResponse) return auth;
   const file = loadCashLedger();
   return NextResponse.json(file);
