@@ -67,11 +67,10 @@ export async function buildJntExpressWorkbookBuffer(rows: JntExportRow[]): Promi
 
   // Column titles start at row 8.
   const headerRow = ws.getRow(8);
-  headerRow.values = ["", ...JNT_TEMPLATE_HEADERS];
+  // Must start at column A (no offset).
+  headerRow.values = [...JNT_TEMPLATE_HEADERS];
   headerRow.height = 22;
   headerRow.eachCell((cell, col) => {
-    // Row# in exceljs headerRow includes column 1..N; col 1 is blank from `.values`.
-    if (col === 1) return;
     cell.font = { bold: true, color: { argb: "FF000000" } };
     cell.fill = {
       type: "pattern",
