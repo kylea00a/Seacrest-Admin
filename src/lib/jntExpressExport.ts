@@ -71,9 +71,11 @@ export async function buildJntExpressWorkbookBuffer(rows: JntExportRow[]): Promi
   for (let r = 1; r <= 7; r++) {
     const row = ws.getRow(r);
     row.hidden = true;
-    row.eachCell({ includeEmpty: true }, (cell) => {
+    // Ensure even empty cells are created & styled.
+    for (let c = 1; c <= JNT_TEMPLATE_HEADERS.length; c++) {
+      const cell = row.getCell(c);
       cell.font = { ...(cell.font ?? {}), name: "Times New Roman" };
-    });
+    }
   }
 
   // Column titles start at row 8.
