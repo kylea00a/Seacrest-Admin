@@ -68,7 +68,13 @@ export async function buildJntExpressWorkbookBuffer(rows: JntExportRow[]): Promi
   ws.getCell("E6").font = { name: "Times New Roman", size: 20, color: { argb: "FF000000" } };
 
   // Hide rows 1–7.
-  for (let r = 1; r <= 7; r++) ws.getRow(r).hidden = true;
+  for (let r = 1; r <= 7; r++) {
+    const row = ws.getRow(r);
+    row.hidden = true;
+    row.eachCell({ includeEmpty: true }, (cell) => {
+      cell.font = { ...(cell.font ?? {}), name: "Times New Roman" };
+    });
+  }
 
   // Column titles start at row 8.
   const headerRow = ws.getRow(8);
