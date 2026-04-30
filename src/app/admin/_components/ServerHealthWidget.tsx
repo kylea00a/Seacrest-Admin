@@ -101,26 +101,26 @@ export default function ServerHealthWidget() {
 
   const severityClass =
     derived?.severity === "bad"
-      ? "border-red-500/40 bg-red-500/10"
+      ? "border-red-500/30 bg-red-500/[0.06]"
       : derived?.severity === "warn"
-        ? "border-amber-500/40 bg-amber-500/10"
-        : "border-emerald-500/35 bg-emerald-500/10";
+        ? "border-amber-500/30 bg-amber-500/[0.06]"
+        : "border-emerald-500/25 bg-emerald-500/[0.05]";
 
   return (
     <div className="fixed bottom-4 right-4 z-40">
       <div
         className={cx(
-          "w-[270px] rounded-2xl border p-3 shadow-[0_18px_60px_-20px_rgba(0,0,0,0.85)] backdrop-blur-xl",
-          "ring-1 ring-white/[0.05]",
+          "w-[220px] rounded-xl border p-2 shadow-[0_18px_60px_-24px_rgba(0,0,0,0.75)] backdrop-blur-xl",
+          "ring-1 ring-white/[0.035]",
           severityClass,
         )}
       >
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-300">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-300/90">
               Server health
             </div>
-            <div className="mt-1 text-xs text-zinc-400">
+            <div className="mt-0.5 text-[11px] text-zinc-400/90">
               {stale ? (
                 <span className="text-amber-200/90">Stale (no update)</span>
               ) : error ? (
@@ -134,45 +134,44 @@ export default function ServerHealthWidget() {
           </div>
           <div
             className={cx(
-              "shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold",
+              "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
               derived?.severity === "bad"
-                ? "bg-red-500/15 text-red-200 ring-1 ring-red-500/30"
+                ? "bg-red-500/10 text-red-200 ring-1 ring-red-500/20"
                 : derived?.severity === "warn"
-                  ? "bg-amber-500/15 text-amber-200 ring-1 ring-amber-500/30"
-                  : "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-500/30",
+                  ? "bg-amber-500/10 text-amber-200 ring-1 ring-amber-500/20"
+                  : "bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-500/20",
             )}
           >
             {derived?.severity === "bad" ? "Needs attention" : derived?.severity === "warn" ? "Watch" : "OK"}
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-          <div className="rounded-xl border border-white/10 bg-black/20 p-2">
-            <div className="text-[11px] font-semibold text-zinc-400">Latency</div>
-            <div className={cx("mt-1 font-mono text-[12px]", derived?.warnLatency ? "text-red-200" : "text-zinc-100")}>
+        <div className="mt-2 grid grid-cols-2 gap-1.5 text-[11px]">
+          <div className="rounded-lg border border-white/10 bg-black/10 p-1.5">
+            <div className="text-[10px] font-semibold text-zinc-400/90">Latency</div>
+            <div className={cx("mt-0.5 font-mono text-[11px]", derived?.warnLatency ? "text-red-200" : "text-zinc-100")}>
               {latencyMs != null ? `${latencyMs} ms` : "—"}
             </div>
           </div>
-          <div className="rounded-xl border border-white/10 bg-black/20 p-2">
-            <div className="text-[11px] font-semibold text-zinc-400">Uptime</div>
-            <div className="mt-1 font-mono text-[12px] text-zinc-100">{stats ? fmtUptime(stats.uptimeSec) : "—"}</div>
+          <div className="rounded-lg border border-white/10 bg-black/10 p-1.5">
+            <div className="text-[10px] font-semibold text-zinc-400/90">Uptime</div>
+            <div className="mt-0.5 font-mono text-[11px] text-zinc-100">{stats ? fmtUptime(stats.uptimeSec) : "—"}</div>
           </div>
-          <div className="rounded-xl border border-white/10 bg-black/20 p-2">
-            <div className="text-[11px] font-semibold text-zinc-400">RAM (system)</div>
-            <div className={cx("mt-1 font-mono text-[12px]", derived?.warnMem ? "text-amber-200" : "text-zinc-100")}>
+          <div className="rounded-lg border border-white/10 bg-black/10 p-1.5">
+            <div className="text-[10px] font-semibold text-zinc-400/90">RAM (sys)</div>
+            <div className={cx("mt-0.5 font-mono text-[11px]", derived?.warnMem ? "text-amber-200" : "text-zinc-100")}>
               {stats && derived ? `${derived.osUsedPct}%` : "—"}
-              {stats ? <span className="text-zinc-500"> ({stats.os.usedMB} / {stats.os.totalMB} MB)</span> : null}
             </div>
           </div>
-          <div className="rounded-xl border border-white/10 bg-black/20 p-2">
-            <div className="text-[11px] font-semibold text-zinc-400">RAM (process)</div>
-            <div className="mt-1 font-mono text-[12px] text-zinc-100">
+          <div className="rounded-lg border border-white/10 bg-black/10 p-1.5">
+            <div className="text-[10px] font-semibold text-zinc-400/90">RAM (app)</div>
+            <div className="mt-0.5 font-mono text-[11px] text-zinc-100">
               {stats && derived ? `${stats.node.rssMB} MB (${derived.nodeRssPct}%)` : "—"}
             </div>
           </div>
         </div>
 
-        <div className="mt-2 flex items-center justify-between text-[11px] text-zinc-500">
+        <div className="mt-1.5 flex items-center justify-between text-[10px] text-zinc-500/90">
           <div className={cx(derived?.warnLoad ? "text-amber-200" : "")}>
             Load: {stats ? `${stats.os.load1} / ${stats.os.cpuCount} CPU` : "—"}
           </div>
