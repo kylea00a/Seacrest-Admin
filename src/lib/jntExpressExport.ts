@@ -10,7 +10,7 @@ export const JNT_TEMPLATE_HEADERS = [
   "Receiver Region (*)",
   "Express Type (*)",
   "Parcel Name (*)",
-  "Weight (kg) (*)",
+  "Weight (kg)  (*)",
   "Total parcels(*)",
   "Parcel Value (Insurance Fee) (*)",
   "COD (PHP) (*)",
@@ -61,6 +61,11 @@ export async function buildJntExpressWorkbookBuffer(rows: JntExportRow[]): Promi
   ws.getCell("A6").value = "V20200721";
   ws.getCell("E6").value = "ORDER LIST";
   ws.getCell("A7").value = "(*) Information that must be filled out";
+
+  ws.getCell("C3").font = { name: "Times New Roman", size: 12, color: { argb: "FFFF0000" } };
+  ws.getCell("A6").font = { name: "Times New Roman", size: 10, color: { argb: "FF000000" } };
+  ws.getCell("A7").font = { name: "Times New Roman", size: 12, color: { argb: "FFFF0000" } };
+  ws.getCell("E6").font = { name: "Times New Roman", size: 20, color: { argb: "FF000000" } };
 
   // Hide rows 1–7.
   for (let r = 1; r <= 7; r++) ws.getRow(r).hidden = true;
