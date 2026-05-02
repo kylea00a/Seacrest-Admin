@@ -272,7 +272,6 @@ export type InventoryOutOrderDetail = {
   sourceDate: string;
   distributorName: string;
   shippingFullName: string;
-  /** Raw delivery method string from the order row (pick-up vs delivery classification uses orderClaim helpers). */
   deliveryMethod: string;
   lines: Array<{
     kind: "package" | "subscription" | "repurchase";
