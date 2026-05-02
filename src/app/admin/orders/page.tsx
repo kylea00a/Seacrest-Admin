@@ -17,7 +17,7 @@ import {
 } from "@/data/admin/orderClaim";
 import type { OrderClaimRecord } from "@/data/admin/types";
 import { useAdminSession } from "../AdminSessionContext";
-import { orderRowMatchesSearchQuery, orderSearchFieldsFromRecord } from "@/lib/orderSearchMatch";
+import { orderInvoiceMatchesSearch } from "@/lib/orderSearchMatch";
 
 async function safeReadJson<T>(res: Response): Promise<T> {
   const text = await res.text();
@@ -820,7 +820,7 @@ export default function OrdersPage() {
       if (!matchesStatus) return false;
       if (!search.trim()) return true;
 
-      return orderRowMatchesSearchQuery(search, orderSearchFieldsFromRecord(r as unknown as Record<string, unknown>));
+      return orderInvoiceMatchesSearch(search, r.invoiceNumber);
     });
   }, [rows, statusFilter, search]);
 
@@ -848,9 +848,9 @@ export default function OrdersPage() {
         <div>
           <h1 className="admin-title">All Orders (Detailed)</h1>
           <div className="admin-muted">
-            Compiled from confirmed uploads. With search filled, results load across{" "}
-            <span className="text-zinc-300">all import days</span> (by name or invoice). Empty search uses only the date
-            range below.
+            Compiled from confirmed uploads. Search uses{" "}
+            <span className="text-zinc-300">invoice number only</span> (matches all dates on disk, including past). Leave
+            search empty to use the date range below.
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -886,7 +886,7 @@ export default function OrdersPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="mt-1 w-64 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-emerald-500/60"
-              placeholder="Name, invoice #, or words (e.g. Maria JT001…)"
+              placeholder="Invoice # (e.g. INV-53422025050100001)"
             />
           </div>
           <div>

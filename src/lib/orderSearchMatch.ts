@@ -1,23 +1,6 @@
 /**
- * Shared logic for All Orders search (client filter + /api/admin/orders/search).
- * - Multiple words = AND: each token must match somewhere in searchable text.
- * - Invoice: substring + ignores spaces/dashes when comparing (handles INV-… and numeric JSON).
- * - Collapses whitespace so "Maria  Garcia" still matches query "maria garcia".
+ * All Orders search — invoice number only (normalized substring on full history).
  */
-
-export type OrderSearchFields = {
-  distributorId?: string;
-  distributorName?: string;
-  shippingFullName?: string;
-  ordererName?: string;
-  invoiceNumber?: string;
-  contactNumber?: string;
-  email?: string;
-  shippingFullAddress?: string;
-  city?: string;
-  province?: string;
-  region?: string;
-};
 
 /** Normalize values from DB/JSON (invoice may be stored as number). */
 export function stringifySearchField(v: unknown): string {
@@ -28,66 +11,19 @@ export function stringifySearchField(v: unknown): string {
   return String(v).trim();
 }
 
-/** Build search fields from a merged order row (parsed + adjustments). */
-export function orderSearchFieldsFromRecord(rec: Record<string, unknown>): OrderSearchFields {
-  return {
-    distributorId: stringifySearchField(rec["distributorId"]),
-    distributorName: stringifySearchField(rec["distributorName"]),
-    shippingFullName: stringifySearchField(rec["shippingFullName"]),
-    ordererName: stringifySearchField(rec["ordererName"]),
-    invoiceNumber: stringifySearchField(rec["invoiceNumber"]),
-    contactNumber: stringifySearchField(rec["contactNumber"]),
-    email: stringifySearchField(rec["email"]),
-    shippingFullAddress: stringifySearchField(rec["shippingFullAddress"]),
-    city: stringifySearchField(rec["city"]),
-    province: stringifySearchField(rec["province"]),
-    region: stringifySearchField(rec["region"]),
-  };
+/** Lowercase, remove spaces/dashes/slashes/underscores for fuzzy invoice compare. */
+export function normalizeInvoiceSearchKey(s: string): string {
+  return s.toLowerCase().replace(/[\s\-_/]/g, "");
 }
 
-function collapseWs(s: string): string {
-  return s.replace(/\s+/g, " ").trim();
-}
-
-export function orderRowMatchesSearchQuery(qRaw: string, fields: OrderSearchFields): boolean {
-  const qNorm = collapseWs(qRaw).toLowerCase();
-  if (!qNorm) return true;
-
-  const tokens = qNorm.split(/\s+/).filter((t) => t.length > 0);
-  if (tokens.length === 0) return true;
-
-  const invoiceRaw = stringifySearchField(fields.invoiceNumber);
-  const invoiceLower = invoiceRaw.toLowerCase();
-  const invoiceNorm = invoiceLower.replace(/[\s\-_/]/g, "");
-
-  const hay = collapseWs(
-    [
-      fields.distributorId,
-      fields.distributorName,
-      fields.shippingFullName,
-      fields.ordererName,
-      fields.invoiceNumber,
-      fields.contactNumber,
-      fields.email,
-      fields.shippingFullAddress,
-      fields.city,
-      fields.province,
-      fields.region,
-    ]
-      .map((v) => stringifySearchField(v))
-      .filter(Boolean)
-      .join(" "),
-  ).toLowerCase();
-
-  for (const token of tokens) {
-    const tl = token.toLowerCase();
-    if (hay.includes(tl)) continue;
-
-    const tokenNorm = tl.replace(/[\s\-_/]/g, "");
-    if (tokenNorm.length >= 2 && invoiceNorm.includes(tokenNorm)) continue;
-    if (invoiceLower.includes(tl)) continue;
-
-    return false;
-  }
-  return true;
+/**
+ * True if the row's invoice matches the search box (invoice-only).
+ * Partial OK: e.g. query `534220250501` matches `INV-53422025050100001`.
+ */
+export function orderInvoiceMatchesSearch(qRaw: string, invoiceUnknown: unknown): boolean {
+  const qNorm = normalizeInvoiceSearchKey(qRaw.trim());
+  const invNorm = normalizeInvoiceSearchKey(stringifySearchField(invoiceUnknown));
+  if (!qNorm) return false;
+  if (!invNorm) return false;
+  return invNorm.includes(qNorm);
 }

@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { mergeOrderRowWithAdjustment } from "@/data/admin/orderAdjustmentMerge";
 import { resolvePackageNameFromPrice } from "@/data/admin/packageResolve";
-import { readOrdersDayAsync } from "@/data/admin/orders";
+import { mergeIndexAndDiskOrderDates, readOrdersDayAsync } from "@/data/admin/orders";
 import { loadAdminSettings, loadOrderAdjustments, loadOrderClaims, loadOrdersIndex } from "@/data/admin/storage";
-import { orderRowMatchesSearchQuery, orderSearchFieldsFromRecord, stringifySearchField } from "@/lib/orderSearchMatch";
+import { orderInvoiceMatchesSearch, stringifySearchField } from "@/lib/orderSearchMatch";
 import { requireApiAnyPermission } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
@@ -46,7 +46,8 @@ export async function GET(req: Request) {
   const startedAt = Date.now();
   const maxMs = Math.min(15000, Math.max(800, Number(url.searchParams.get("maxMs") ?? 10000) || 10000));
   let scannedDays = 0;
-  const dates = index.map((i) => i.date).sort((a, b) => b.localeCompare(a));
+  /** Include every on-disk order day — index alone can omit older imports. */
+  const dates = mergeIndexAndDiskOrderDates(index.map((i) => i.date));
 
   const batchSize = 16;
   outer: for (let bi = 0; bi < dates.length; bi += batchSize) {
@@ -84,7 +85,7 @@ export async function GET(req: Request) {
         const mergedRec = mergeOrderRowWithAdjustment(rec as Record<string, unknown>, adj);
         const effectiveDate = adj?.effectiveDate ?? sourceDate;
 
-        if (!orderRowMatchesSearchQuery(qRaw, orderSearchFieldsFromRecord(mergedRec))) {
+        if (!orderInvoiceMatchesSearch(qRaw, mergedRec["invoiceNumber"])) {
           continue;
         }
 

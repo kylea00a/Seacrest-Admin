@@ -89,3 +89,31 @@ export function deleteOrdersStaging(token: string) {
   if (fs.existsSync(file)) fs.unlinkSync(file);
 }
 
+const ORDER_DAY_FILE_RE = /^(\d{4}-\d{2}-\d{2})\.json$/;
+
+/** All `YYYY-MM-DD.json` files under `data/admin/orders` (newest-first sort). */
+export function listOrderDayDatesOnDisk(): string[] {
+  ensureOrdersDir();
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(ORDERS_DIR);
+  } catch {
+    return [];
+  }
+  const dates: string[] = [];
+  for (const n of names) {
+    const m = n.match(ORDER_DAY_FILE_RE);
+    if (m) dates.push(m[1]!);
+  }
+  return dates.sort((a, b) => b.localeCompare(a));
+}
+
+/**
+ * Dates to scan for global search: union index + on-disk files (index can be missing older days).
+ */
+export function mergeIndexAndDiskOrderDates(indexDates: string[]): string[] {
+  const disk = listOrderDayDatesOnDisk();
+  const set = new Set<string>([...indexDates, ...disk]);
+  return Array.from(set).sort((a, b) => b.localeCompare(a));
+}
+
