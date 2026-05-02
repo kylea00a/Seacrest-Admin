@@ -61,25 +61,24 @@ export function packingContentsSignature(
   return parts.join(" / ");
 }
 
-/** Aggregate identical package mixes across orders (counts orders per signature). */
-export function aggregatePackingSummaryLines(
+/** Aggregate identical package mixes across orders → rows for PDF summary table. */
+export function aggregatePackingSummaryRows(
   groups: MergedDeliveryGroup[],
   productKeys: string[],
   abbreviations: Record<string, string> | undefined,
-): string[] {
+): (string | number)[][] {
   const counts = new Map<string, number>();
   for (const g of groups) {
     const sig = packingContentsSignature(g, productKeys, abbreviations);
     if (!sig) continue;
     counts.set(sig, (counts.get(sig) ?? 0) + 1);
   }
-  const lines: string[] = [];
+  const rows: (string | number)[][] = [];
   const entries = [...counts.entries()].sort(([a], [b]) => a.localeCompare(b));
   for (const [sig, n] of entries) {
-    const pkgWord = n === 1 ? "package" : "packages";
-    lines.push(`${n} ${pkgWord} of ${sig}`);
+    rows.push([n, "Package/s of", sig]);
   }
-  return lines;
+  return rows;
 }
 
 export type PackingPdfOpts = {
@@ -217,16 +216,16 @@ export function buildPackingExportPdfBlob(opts: PackingPdfOpts): Blob {
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
-  doc.text("Summary (aggregated by identical contents)", margin, summaryY);
+  doc.text("Summary", margin, summaryY);
   summaryY += 5;
 
-  const summaryLines = aggregatePackingSummaryLines(groups, productKeys, productAbbreviations);
-  const summaryBody: string[][] =
-    summaryLines.length > 0 ? summaryLines.map((line) => [line]) : [["No products in export"]];
+  const summaryRows = aggregatePackingSummaryRows(groups, productKeys, productAbbreviations);
+  const summaryBody: (string | number)[][] =
+    summaryRows.length > 0 ? summaryRows : [["—", "—", "No products in export"]];
 
   autoTable(doc, {
     startY: summaryY,
-    head: [["Line"]],
+    head: [["Total Package", "UOM", "Description"]],
     body: summaryBody,
     styles: {
       fontSize: 8,
@@ -237,7 +236,9 @@ export function buildPackingExportPdfBlob(opts: PackingPdfOpts): Blob {
     },
     headStyles: { fillColor: [220, 220, 220], fontStyle: "bold" },
     columnStyles: {
-      0: { cellWidth: tableInnerW },
+      0: { cellWidth: 22, halign: "center" },
+      1: { cellWidth: 28 },
+      2: { cellWidth: "auto" },
     },
     margin: { left: margin, right: margin },
     tableWidth: tableInnerW,
