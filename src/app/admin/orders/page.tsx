@@ -17,6 +17,7 @@ import {
 } from "@/data/admin/orderClaim";
 import type { OrderClaimRecord } from "@/data/admin/types";
 import { useAdminSession } from "../AdminSessionContext";
+import { orderRowMatchesSearchQuery } from "@/lib/orderSearchMatch";
 
 async function safeReadJson<T>(res: Response): Promise<T> {
   const text = await res.text();
@@ -466,7 +467,7 @@ export default function OrdersPage() {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ q, limit: "500" });
+      const qs = new URLSearchParams({ q, limit: "500", maxMs: "5000" });
       const res = await fetch(`/api/admin/orders/search?${qs.toString()}`, { cache: "no-store" });
       const json = await safeReadJson<{
         rows?: Array<ParsedRow & { date: string }>;
@@ -573,7 +574,8 @@ export default function OrdersPage() {
       });
       const json = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
-      await refetchCompiledRows();
+      if (search.trim()) await refetchSearchRows();
+      else await refetchCompiledRows();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -792,7 +794,8 @@ export default function OrdersPage() {
         delete next[invoiceNumber];
         return next;
       });
-      await refetchCompiledRows();
+      if (search.trim()) await refetchSearchRows();
+      else await refetchCompiledRows();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -801,7 +804,6 @@ export default function OrdersPage() {
   };
 
   const filteredRows = useMemo(() => {
-    const q = search.trim().toLowerCase();
     return rows.filter((r) => {
       const s = (r.status ?? "").toLowerCase();
       const matchesStatus =
@@ -816,20 +818,15 @@ export default function OrdersPage() {
                 : s.includes("cancel");
 
       if (!matchesStatus) return false;
-      if (!q) return true;
+      if (!search.trim()) return true;
 
-      const hay = [
-        r.distributorId,
-        r.distributorName,
-        r.shippingFullName,
-        r.ordererName,
-        r.invoiceNumber,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      return hay.includes(q);
+      return orderRowMatchesSearchQuery(search, {
+        distributorId: r.distributorId,
+        distributorName: r.distributorName,
+        shippingFullName: r.shippingFullName,
+        ordererName: r.ordererName,
+        invoiceNumber: r.invoiceNumber,
+      });
     });
   }, [rows, statusFilter, search]);
 
@@ -857,7 +854,9 @@ export default function OrdersPage() {
         <div>
           <h1 className="admin-title">All Orders (Detailed)</h1>
           <div className="admin-muted">
-            Compiled from confirmed uploads. Only the selected date range is loaded—narrow the range for faster loads.
+            Compiled from confirmed uploads. With search filled, results load across{" "}
+            <span className="text-zinc-300">all import days</span> (by name or invoice). Empty search uses only the date
+            range below.
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -893,7 +892,7 @@ export default function OrdersPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="mt-1 w-64 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-emerald-500/60"
-              placeholder="Distributor / Receiver / ID / Invoice…"
+              placeholder="Name, invoice #, or words (e.g. Maria JT001…)"
             />
           </div>
           <div>
