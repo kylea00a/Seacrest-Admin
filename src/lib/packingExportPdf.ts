@@ -111,28 +111,29 @@ export function buildPackingExportPdfBlob(opts: PackingPdfOpts): Blob {
   const margin = 10;
   const tableInnerW = pageW - margin * 2;
 
-  /** Header: left stack (date + courier) must not share baseline with centered address. */
+  /** Header: company title + address first; date & courier left-aligned below address (no overlap with title). */
   const leftX = margin;
-  let y = 12;
+  let cy = 12;
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.text(`Date: ${dateStr}`, leftX, y);
   doc.setFontSize(12);
-  doc.text(COMPANY_NAME, pageW / 2, y, { align: "center" });
-  y += 6;
-  doc.setFontSize(10);
-  doc.text(`Courier: ${courierLabel}`, leftX, y);
-  y += 2;
+  doc.text(COMPANY_NAME, pageW / 2, cy, { align: "center" });
+  cy += 6;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   const addrLines = doc.splitTextToSize(COMPANY_ADDRESS, pageW - margin * 2);
   const lineHeight = 4.2;
-  let cy = y;
   for (let i = 0; i < addrLines.length; i++) {
     doc.text(String(addrLines[i]), pageW / 2, cy, { align: "center" });
     cy += lineHeight;
   }
-  const tableStartY = cy + 6;
+  cy += 4;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text(`Date: ${dateStr}`, leftX, cy);
+  cy += 6;
+  doc.text(`Courier: ${courierLabel}`, leftX, cy);
+  cy += 6;
+  const tableStartY = cy + 2;
 
   const labels = productKeys.map(productColumnLabel);
 
