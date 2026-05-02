@@ -3,17 +3,13 @@ import autoTable from "jspdf-autotable";
 import { format, parseISO } from "date-fns";
 
 import type { MergedDeliveryGroup } from "@/data/admin/deliveryGrouping";
+import { productColumnLabel } from "./productTableLabels";
+
+export { productColumnLabel } from "./productTableLabels";
 
 const COMPANY_NAME = "SEACREST WELLNESS ENTERPRISE, INC.";
 const COMPANY_ADDRESS =
   "Unit 215 2nd Floor Vel-Ounao Commercial Bldg., MC Briones Street Maguikay 6014 City of Mandaue Cebu Philippines";
-
-export function productColumnLabel(productKey: string): string {
-  if (productKey === "Radiance Coffee") return "SeaSkin Radiance";
-  if (productKey === "Seahealth Coffee") return "SeaHealth Coffee";
-  if (productKey === "Supreme") return "SeaSkin Supreme";
-  return productKey;
-}
 
 function fmtLongDateRange(startYmd: string, endYmd: string): string {
   try {

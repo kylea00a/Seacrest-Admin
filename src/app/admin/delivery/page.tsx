@@ -12,6 +12,7 @@ import {
   type MergedDeliveryGroup,
 } from "@/data/admin/deliveryGrouping";
 import { findWaybillForReceiverDateRange } from "@/data/admin/jntImportMatch";
+import { productColumnLabel } from "@/lib/productTableLabels";
 import { useAdminProductKeys } from "../_components/useAdminProductKeys";
 import type { DeliveryTrackingMap } from "@/data/admin/storage";
 
@@ -48,13 +49,6 @@ function allTrackingSavedForGroup(
   tracking: DeliveryTrackingMap,
 ): boolean {
   return group.invoiceNumbers.every((inv) => Boolean(tracking[inv]?.trackingNumber));
-}
-
-function tableProductHeader(k: string): string {
-  if (k === "Radiance Coffee") return "SeaSkin Radiance";
-  if (k === "Seahealth Coffee") return "SeaHealth Coffee";
-  if (k === "Supreme") return "SeaSkin Supreme";
-  return k;
 }
 
 export default function DeliveryPage() {
@@ -183,6 +177,12 @@ export default function DeliveryPage() {
     }
     return map;
   }, [groups, jntImport, startDate, endDate, courierFilter]);
+
+  const productColumnTotals = useMemo(
+    () =>
+      productKeys.map((k) => groups.reduce((acc, g) => acc + (g.productTotals[k] ?? 0), 0)),
+    [groups, productKeys],
+  );
 
   const saveTrackingGroup = async (g: MergedDeliveryGroup) => {
     const imp = importWaybillByKey[g.key];
@@ -367,19 +367,31 @@ export default function DeliveryPage() {
           <thead className="bg-black/30 text-zinc-300">
             <tr className="text-[11px]">
               <th className="px-3 py-2 text-left">No.</th>
-              <th className="px-3 py-2 text-left">Distributor</th>
               <th className="px-3 py-2 text-left">Receiver</th>
               {productKeys.map((k) => (
                 <th key={k} className="px-2 py-2 text-center whitespace-nowrap">
-                  {tableProductHeader(k)}
+                  {productColumnLabel(k)}
                 </th>
               ))}
+              <th className="px-3 py-2 text-left">Tracking Number</th>
+              <th className="px-3 py-2 text-left">Distributor</th>
               <th className="px-3 py-2 text-left">Contact #</th>
               <th className="px-3 py-2 text-left">Address</th>
-              <th className="px-3 py-2 text-left">Tracking Number</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/10">
+            {groups.length > 0 ? (
+              <tr className="border-b border-white/10 bg-black/25 font-semibold text-zinc-200">
+                <td className="px-3 py-2" />
+                <td className="px-3 py-2 whitespace-nowrap">Totals</td>
+                {productKeys.map((k, idx) => (
+                  <td key={`tot-${k}`} className="px-2 py-2 text-center tabular-nums">
+                    {productColumnTotals[idx]! > 0 ? productColumnTotals[idx] : ""}
+                  </td>
+                ))}
+                <td className="px-3 py-2" colSpan={4} />
+              </tr>
+            ) : null}
             {groups.map((g, i) => {
               const locked = allTrackingSavedForGroup(g, tracking);
               const importWaybill = importWaybillByKey[g.key];
@@ -390,17 +402,12 @@ export default function DeliveryPage() {
               return (
                 <tr key={g.key} className="bg-black/10 text-zinc-100">
                   <td className="px-3 py-2 whitespace-nowrap">{i + 1}</td>
-                  <td className="max-w-[14rem] px-3 py-2 text-sm leading-snug text-zinc-200" title={label}>
-                    {label}
-                  </td>
                   <td className="px-3 py-2 whitespace-nowrap">{g.shippingFullName}</td>
                   {productKeys.map((k) => (
                     <td key={`${g.key}-${k}`} className="px-2 py-2 text-center">
                       {g.productTotals?.[k] ? g.productTotals[k] : ""}
                     </td>
                   ))}
-                  <td className="px-3 py-2 whitespace-nowrap">{g.contactNumber}</td>
-                  <td className="min-w-[340px] px-3 py-2">{g.shippingFullAddress}</td>
                   <td className="px-3 py-2 whitespace-nowrap">
                     {locked ? (
                       <span className="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-xs text-zinc-200">
@@ -430,6 +437,11 @@ export default function DeliveryPage() {
                       </div>
                     )}
                   </td>
+                  <td className="max-w-[14rem] px-3 py-2 text-sm leading-snug text-zinc-200" title={label}>
+                    {label}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap">{g.contactNumber}</td>
+                  <td className="min-w-[340px] px-3 py-2">{g.shippingFullAddress}</td>
                 </tr>
               );
             })}

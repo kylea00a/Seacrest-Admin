@@ -34,6 +34,7 @@ type OutOrderDetail = {
   effectiveDate: string;
   sourceDate: string;
   distributorName: string;
+  shippingFullName: string;
   lines: Array<{
     kind: "package" | "subscription" | "repurchase";
     productName: string;
@@ -438,13 +439,14 @@ export default function InventoryPage() {
                 <th className="px-3 py-2 text-left whitespace-nowrap">Effective</th>
                 <th className="px-3 py-2 text-left whitespace-nowrap">Source day</th>
                 <th className="px-3 py-2 text-left">Distributor</th>
+                <th className="px-3 py-2 text-left">Shipping full name</th>
                 <th className="px-3 py-2 text-left">Lines</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
               {outDetails.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-3 text-zinc-500" colSpan={5}>
+                  <td className="px-3 py-3 text-zinc-500" colSpan={7}>
                     No claimed out orders for this effective date.
                   </td>
                 </tr>
@@ -455,6 +457,7 @@ export default function InventoryPage() {
                     <td className="px-3 py-2 whitespace-nowrap text-zinc-400">{o.effectiveDate}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-zinc-400">{o.sourceDate}</td>
                     <td className="px-3 py-2">{o.distributorName}</td>
+                    <td className="max-w-[14rem] px-3 py-2 text-zinc-200">{o.shippingFullName}</td>
                     <td className="px-3 py-2">
                       <ul className="list-inside list-disc space-y-0.5 text-zinc-300">
                         {o.lines.map((ln, i) => (

@@ -271,6 +271,7 @@ export type InventoryOutOrderDetail = {
   effectiveDate: string;
   sourceDate: string;
   distributorName: string;
+  shippingFullName: string;
   lines: Array<{
     kind: "package" | "subscription" | "repurchase";
     productName: string;
@@ -345,6 +346,8 @@ export async function computeClaimedOutDetailsForRange(
 
       const distributorName =
         typeof merged["distributorName"] === "string" ? (merged["distributorName"] as string).trim() : "";
+      const shippingFullName =
+        typeof merged["shippingFullName"] === "string" ? (merged["shippingFullName"] as string).trim() : "";
       const lines: InventoryOutOrderDetail["lines"] = [];
 
       const pushMap = (kind: "package" | "subscription" | "repurchase", obj: unknown) => {
@@ -370,6 +373,7 @@ export async function computeClaimedOutDetailsForRange(
         effectiveDate: inventoryDay,
         sourceDate,
         distributorName: distributorName || "—",
+        shippingFullName: shippingFullName || "—",
         lines,
       });
       seenInvoices.add(invoiceNumber);
@@ -413,6 +417,8 @@ export async function computeClaimedOutDetailsForRange(
 
     const distributorName =
       typeof merged["distributorName"] === "string" ? (merged["distributorName"] as string).trim() : "";
+    const shippingFullName =
+      typeof merged["shippingFullName"] === "string" ? (merged["shippingFullName"] as string).trim() : "";
     const lines: InventoryOutOrderDetail["lines"] = [];
 
     const pushMap = (kind: "package" | "subscription" | "repurchase", obj: unknown) => {
@@ -436,6 +442,7 @@ export async function computeClaimedOutDetailsForRange(
       effectiveDate: claimYmd,
       sourceDate: found.sourceDate,
       distributorName: distributorName || "—",
+      shippingFullName: shippingFullName || "—",
       lines,
     });
     seenInvoices.add(invoiceNumber);
