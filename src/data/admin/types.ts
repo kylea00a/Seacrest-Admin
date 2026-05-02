@@ -148,6 +148,11 @@ export interface AdminSettings {
   packages: AdminPackageItem[];
   products: AdminProductItem[];
   /**
+   * Optional short codes for packing PDF summary (product name → abbreviation).
+   * Used in phrases like `2 packages of 2 S / 2 L`.
+   */
+  productAbbreviations?: Record<string, string>;
+  /**
    * If enabled, superadmin can edit an already-encoded ending inventory snapshot.
    * When disabled, encoded ending inventory is read-only for everyone.
    */

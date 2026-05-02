@@ -265,6 +265,7 @@ export default function DeliveryPage() {
         productKeys,
         groups,
         trackingByGroupKey,
+        productAbbreviations: settings.productAbbreviations,
       });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);

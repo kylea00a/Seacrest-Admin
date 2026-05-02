@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { roundWeight2 } from "@/data/admin/productSettings";
-import { loadAdminSettings, saveAdminSettings } from "@/data/admin/storage";
+import { loadAdminSettings, normalizeProductAbbreviations, saveAdminSettings } from "@/data/admin/storage";
 import type { AdminProductItem, AdminSettings } from "@/data/admin/types";
 import { requireApiPermission, requireApiSession } from "@/lib/adminApiAuth";
 
@@ -12,6 +12,7 @@ type SettingsBody = {
   pettyCashCategories?: unknown;
   packages?: unknown;
   products?: unknown;
+  productAbbreviations?: unknown;
   allowSuperadminEditEncodedInventory?: unknown;
 };
 
@@ -117,11 +118,17 @@ export async function POST(req: Request) {
       ? current.allowSuperadminEditEncodedInventory ?? false
       : Boolean(body.allowSuperadminEditEncodedInventory);
 
+  const productAbbreviations =
+    body.productAbbreviations === undefined
+      ? current.productAbbreviations
+      : normalizeProductAbbreviations(body.productAbbreviations);
+
   const next: AdminSettings = {
     expenseCategories: expenseCategories.length ? expenseCategories : current.expenseCategories,
     pettyCashCategories: pettyCashCategories.length ? pettyCashCategories : current.pettyCashCategories,
     packages: packages.length ? packages : current.packages,
     products: products.length ? products : current.products,
+    productAbbreviations: Object.keys(productAbbreviations ?? {}).length ? productAbbreviations : undefined,
     allowSuperadminEditEncodedInventory,
     updatedAt: new Date().toISOString(),
   };

@@ -24,8 +24,8 @@ function fmtLongDateRange(startYmd: string, endYmd: string): string {
   }
 }
 
-/** Short label for summary text (e.g. Soap, Lotion). */
-function productShortLabel(productKey: string): string {
+/** Fallback abbreviation when settings map has no entry (short readable token). */
+export function productAbbrevFallback(productKey: string): string {
   const full = productColumnLabel(productKey);
   if (full.startsWith("Chips")) {
     const m = full.match(/\(([^)]+)\)/);
@@ -34,31 +34,52 @@ function productShortLabel(productKey: string): string {
   return full.replace(/^SeaSkin\s+/i, "").trim() || full;
 }
 
-/** One order line: total pieces + human-readable breakdown. */
-function orderSummaryParts(
+function abbrevForProduct(
+  productKey: string,
+  abbreviations: Record<string, string> | undefined,
+): string {
+  const custom = abbreviations?.[productKey]?.trim();
+  if (custom) return custom;
+  return productAbbrevFallback(productKey);
+}
+
+/**
+ * Canonical contents line for one order, e.g. `2 BBQ`, `1 FV`, `2 S / 2 L`
+ * (follows table column / product key order).
+ */
+export function packingContentsSignature(
   g: MergedDeliveryGroup,
   productKeys: string[],
-): { totalPieces: number; phrase: string } {
-  const segments: string[] = [];
-  let totalPieces = 0;
+  abbreviations: Record<string, string> | undefined,
+): string {
+  const parts: string[] = [];
   for (const k of productKeys) {
     const n = g.productTotals[k] ?? 0;
     if (n <= 0) continue;
-    totalPieces += n;
-    const short = productShortLabel(k);
-    segments.push(`${n} ${short}`);
+    parts.push(`${n} ${abbrevForProduct(k, abbreviations)}`);
   }
-  if (segments.length === 0) {
-    return { totalPieces: 0, phrase: "—" };
+  return parts.join(" / ");
+}
+
+/** Aggregate identical package mixes across orders (counts orders per signature). */
+export function aggregatePackingSummaryLines(
+  groups: MergedDeliveryGroup[],
+  productKeys: string[],
+  abbreviations: Record<string, string> | undefined,
+): string[] {
+  const counts = new Map<string, number>();
+  for (const g of groups) {
+    const sig = packingContentsSignature(g, productKeys, abbreviations);
+    if (!sig) continue;
+    counts.set(sig, (counts.get(sig) ?? 0) + 1);
   }
-  if (segments.length === 1) {
-    return { totalPieces, phrase: segments[0]! };
+  const lines: string[] = [];
+  const entries = [...counts.entries()].sort(([a], [b]) => a.localeCompare(b));
+  for (const [sig, n] of entries) {
+    const pkgWord = n === 1 ? "package" : "packages";
+    lines.push(`${n} ${pkgWord} of ${sig}`);
   }
-  // e.g. "4 Soap and 2 Lotion" or "2 Soap, 1 Lotion and 3 Chips (BBQ)"
-  const last = segments.pop()!;
-  const phrase =
-    segments.length === 0 ? last : `${segments.join(", ")} and ${last}`;
-  return { totalPieces, phrase };
+  return lines;
 }
 
 export type PackingPdfOpts = {
@@ -69,28 +90,50 @@ export type PackingPdfOpts = {
   groups: MergedDeliveryGroup[];
   /** Resolved tracking per group key (manual saved or J&T import match). */
   trackingByGroupKey: Record<string, string>;
+  /** Settings: product name → packing abbreviation (optional). */
+  productAbbreviations?: Record<string, string>;
 };
 
 export function buildPackingExportPdfBlob(opts: PackingPdfOpts): Blob {
-  const { startDateYmd, endDateYmd, courierLabel, productKeys, groups, trackingByGroupKey } = opts;
+  const {
+    startDateYmd,
+    endDateYmd,
+    courierLabel,
+    productKeys,
+    groups,
+    trackingByGroupKey,
+    productAbbreviations,
+  } = opts;
 
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
 
   const dateStr = fmtLongDateRange(startDateYmd, endDateYmd);
+  const margin = 10;
+  const tableInnerW = pageW - margin * 2;
 
+  /** Header: left stack (date + courier) must not share baseline with centered address. */
+  const leftX = margin;
+  let y = 12;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
-  doc.text(`Date: ${dateStr}`, 14, 14);
-  doc.setFontSize(11);
-  doc.text(`Courier: ${courierLabel}`, 14, 20);
-
+  doc.text(`Date: ${dateStr}`, leftX, y);
   doc.setFontSize(12);
-  doc.text(COMPANY_NAME, pageW / 2, 14, { align: "center" });
-  doc.setFontSize(9);
+  doc.text(COMPANY_NAME, pageW / 2, y, { align: "center" });
+  y += 6;
+  doc.setFontSize(10);
+  doc.text(`Courier: ${courierLabel}`, leftX, y);
+  y += 2;
   doc.setFont("helvetica", "normal");
-  const addrLines = doc.splitTextToSize(COMPANY_ADDRESS, pageW - 28);
-  doc.text(addrLines, pageW / 2, 20, { align: "center" });
+  doc.setFontSize(9);
+  const addrLines = doc.splitTextToSize(COMPANY_ADDRESS, pageW - margin * 2);
+  const lineHeight = 4.2;
+  let cy = y;
+  for (let i = 0; i < addrLines.length; i++) {
+    doc.text(String(addrLines[i]), pageW / 2, cy, { align: "center" });
+    cy += lineHeight;
+  }
+  const tableStartY = cy + 6;
 
   const labels = productKeys.map(productColumnLabel);
 
@@ -117,23 +160,42 @@ export function buildPackingExportPdfBlob(opts: PackingPdfOpts): Blob {
 
   const head = [["No.", "Receiver", ...labels, "Tracking Number"]];
 
+  const colNo = 8;
+  const colRecv = 28;
+  const colTrack = 26;
+  const nP = productKeys.length;
+  const prodW = nP > 0 ? Math.max(6, (tableInnerW - colNo - colRecv - colTrack) / nP) : 0;
+
+  const columnStyles: Record<number, { cellWidth: number; halign?: "center" | "left" | "right" }> = {
+    0: { cellWidth: colNo, halign: "center" },
+    1: { cellWidth: colRecv, halign: "left" },
+  };
+  for (let i = 0; i < nP; i++) {
+    columnStyles[2 + i] = { cellWidth: prodW, halign: "center" };
+  }
+  columnStyles[2 + nP] = { cellWidth: colTrack, halign: "left" };
+
   autoTable(doc, {
-    startY: 32,
+    startY: tableStartY,
     head,
     body,
-    styles: { fontSize: 6, cellPadding: 1, valign: "middle", overflow: "linebreak" },
+    styles: {
+      fontSize: 6,
+      cellPadding: 1,
+      valign: "middle",
+      overflow: "linebreak",
+      lineWidth: 0.1,
+      lineColor: [220, 220, 220],
+    },
     headStyles: {
       fillColor: [255, 243, 180],
       textColor: 20,
       fontStyle: "bold",
       halign: "center",
     },
-    columnStyles: {
-      0: { halign: "center", cellWidth: 9 },
-      1: { cellWidth: 26, halign: "left" },
-    },
-    margin: { left: 10, right: 10 },
-    tableWidth: pageW - 20,
+    columnStyles,
+    margin: { left: margin, right: margin },
+    tableWidth: tableInnerW,
     didParseCell: (data) => {
       if (data.section === "body" && data.row.index === 0) {
         data.cell.styles.fillColor = [240, 240, 240];
@@ -146,38 +208,39 @@ export function buildPackingExportPdfBlob(opts: PackingPdfOpts): Blob {
   });
 
   const lastY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? 200;
-  let y = lastY + 8;
+  let summaryY = lastY + 8;
 
-  if (y > doc.internal.pageSize.getHeight() - 40) {
+  if (summaryY > doc.internal.pageSize.getHeight() - 40) {
     doc.addPage();
-    y = 20;
+    summaryY = 20;
   }
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
-  doc.text("Summary (by order)", 14, y);
-  y += 5;
+  doc.text("Summary (aggregated by identical contents)", margin, summaryY);
+  summaryY += 5;
 
-  /** One row per delivery group: total pieces + breakdown like sample (5 packages … / 2 packages …). */
-  const summaryBody: (string | number)[][] = groups.map((g) => {
-    const { totalPieces, phrase } = orderSummaryParts(g, productKeys);
-    const desc = `${g.shippingFullName}: ${phrase}`;
-    return [totalPieces || "—", "Package/s of", desc];
-  });
+  const summaryLines = aggregatePackingSummaryLines(groups, productKeys, productAbbreviations);
+  const summaryBody: string[][] =
+    summaryLines.length > 0 ? summaryLines.map((line) => [line]) : [["No products in export"]];
 
   autoTable(doc, {
-    startY: y,
-    head: [["Total Package", "UOM", "Description"]],
+    startY: summaryY,
+    head: [["Line"]],
     body: summaryBody,
-    styles: { fontSize: 8, cellPadding: 1.2, overflow: "linebreak" },
+    styles: {
+      fontSize: 8,
+      cellPadding: 1.2,
+      overflow: "linebreak",
+      lineWidth: 0.1,
+      lineColor: [220, 220, 220],
+    },
     headStyles: { fillColor: [220, 220, 220], fontStyle: "bold" },
     columnStyles: {
-      0: { cellWidth: 22, halign: "center" },
-      1: { cellWidth: 28 },
-      2: { cellWidth: "auto" },
+      0: { cellWidth: tableInnerW },
     },
-    margin: { left: 10, right: 10 },
-    tableWidth: pageW - 20,
+    margin: { left: margin, right: margin },
+    tableWidth: tableInnerW,
   });
 
   return doc.output("blob");

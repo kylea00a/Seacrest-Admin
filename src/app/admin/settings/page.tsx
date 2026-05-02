@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import PackagesProductsEditor from "../_components/PackagesProductsEditor";
-import type { AdminSettings } from "@/data/admin/types";
-import type { BankAccount } from "@/data/admin/types";
+import type { AdminSettings, BankAccount } from "@/data/admin/types";
 
 function uniq(list: string[]): string[] {
   return Array.from(new Set(list.map((s) => s.trim()).filter(Boolean)));
@@ -50,6 +49,7 @@ export default function SettingsPage() {
     expenseCategories?: string[];
     pettyCashCategories?: string[];
     allowSuperadminEditEncodedInventory?: boolean;
+    productAbbreviations?: Record<string, string>;
   }) => {
     setSaving(true);
     setError(null);
@@ -92,6 +92,32 @@ export default function SettingsPage() {
 
   const removePetty = async (value: string) => {
     await save({ pettyCashCategories: uniq((settings?.pettyCashCategories ?? []).filter((c) => c !== value)) });
+  };
+
+  const [abbrDraft, setAbbrDraft] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!settings?.products?.length) {
+      setAbbrDraft({});
+      return;
+    }
+    const saved = settings.productAbbreviations ?? {};
+    const next: Record<string, string> = {};
+    for (const p of settings.products) {
+      next[p.name] = saved[p.name] ?? "";
+    }
+    setAbbrDraft(next);
+  }, [settings]);
+
+  const saveProductAbbreviations = async () => {
+    const cleaned: Record<string, string> = {};
+    for (const [k, v] of Object.entries(abbrDraft)) {
+      const t = v.trim();
+      if (t) cleaned[k] = t;
+    }
+    await save({
+      productAbbreviations: Object.keys(cleaned).length ? cleaned : {},
+    });
   };
 
   const addBankAccount = async () => {
@@ -332,6 +358,57 @@ export default function SettingsPage() {
               ))}
             </div>
           </div>
+
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold">Packing PDF abbreviations</div>
+                <div className="mt-1 text-xs text-zinc-400">
+                  Short codes for the Delivery → Packing PDF summary (e.g.{" "}
+                  <span className="text-zinc-300">S</span>
+                  {" "}for Soap, <span className="text-zinc-300">FV</span> for SeaHealth Coffee). Leave blank to use the
+                  automatic short name.
+                </div>
+              </div>
+            </div>
+
+            {settings?.products?.length ? (
+              <div className="mt-4 space-y-2">
+                <div className="grid grid-cols-[1fr_120px] gap-2 border-b border-white/10 pb-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+                  <div>Product</div>
+                  <div>Abbreviation</div>
+                </div>
+                {settings.products.map((p) => (
+                  <div key={p.name} className="grid grid-cols-[1fr_120px] items-center gap-2">
+                    <div className="text-sm text-zinc-200">{p.name}</div>
+                    <input
+                      value={abbrDraft[p.name] ?? ""}
+                      onChange={(e) =>
+                        setAbbrDraft((prev) => ({ ...prev, [p.name]: e.target.value }))
+                      }
+                      className="admin-input w-full py-1.5 text-sm"
+                      placeholder="e.g. S"
+                      maxLength={16}
+                    />
+                  </div>
+                ))}
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => void saveProductAbbreviations()}
+                    disabled={saving}
+                    className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 hover:bg-emerald-400 disabled:opacity-60"
+                  >
+                    {saving ? "Saving…" : "Save abbreviations"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3 text-xs text-zinc-500">
+                Add products under Packages &amp; products to set abbreviations.
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -365,6 +442,7 @@ export default function SettingsPage() {
           <div>- Use the Add box to insert new categories anytime.</div>
           <div>- Removing a category will not delete existing saved records; it only affects the dropdown options.</div>
           <div>- Packages &amp; products are shared with the dedicated page in the right menu.</div>
+          <div>- Packing PDF abbreviations control the bottom summary lines on Delivery → Packing export.</div>
         </div>
       </div>
     </div>

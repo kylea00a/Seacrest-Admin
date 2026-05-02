@@ -197,13 +197,33 @@ export function loadAdminSettings(): AdminSettings {
   const pettyCashCategories = Array.isArray(loaded.pettyCashCategories)
     ? (loaded.pettyCashCategories as string[]).filter(Boolean)
     : fallback.pettyCashCategories;
+  const productAbbreviations = normalizeProductAbbreviations(loaded.productAbbreviations);
+  const allowSuperadminEditEncodedInventory =
+    typeof loaded.allowSuperadminEditEncodedInventory === "boolean"
+      ? loaded.allowSuperadminEditEncodedInventory
+      : undefined;
   return {
     expenseCategories: expenseCategories.length ? expenseCategories : fallback.expenseCategories,
     pettyCashCategories: pettyCashCategories.length ? pettyCashCategories : fallback.pettyCashCategories,
     packages: migratePackages(loaded.packages, fallback.packages),
     products: migrateProducts(loaded.products, fallback.products),
+    productAbbreviations: Object.keys(productAbbreviations).length ? productAbbreviations : undefined,
+    allowSuperadminEditEncodedInventory,
     updatedAt: typeof loaded.updatedAt === "string" ? loaded.updatedAt : fallback.updatedAt,
   };
+}
+
+export function normalizeProductAbbreviations(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const name = k.trim();
+    if (!name) continue;
+    if (typeof v !== "string") continue;
+    const abbr = v.trim();
+    if (abbr) out[name] = abbr;
+  }
+  return out;
 }
 
 export function saveAdminSettings(settings: AdminSettings) {
