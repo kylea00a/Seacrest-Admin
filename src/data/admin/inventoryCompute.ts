@@ -272,6 +272,8 @@ export type InventoryOutOrderDetail = {
   sourceDate: string;
   distributorName: string;
   shippingFullName: string;
+  /** Raw delivery method string from the order row (pick-up vs delivery classification uses orderClaim helpers). */
+  deliveryMethod: string;
   lines: Array<{
     kind: "package" | "subscription" | "repurchase";
     productName: string;
@@ -374,6 +376,7 @@ export async function computeClaimedOutDetailsForRange(
         sourceDate,
         distributorName: distributorName || "—",
         shippingFullName: shippingFullName || "—",
+        deliveryMethod,
         lines,
       });
       seenInvoices.add(invoiceNumber);
@@ -443,6 +446,7 @@ export async function computeClaimedOutDetailsForRange(
       sourceDate: found.sourceDate,
       distributorName: distributorName || "—",
       shippingFullName: shippingFullName || "—",
+      deliveryMethod,
       lines,
     });
     seenInvoices.add(invoiceNumber);

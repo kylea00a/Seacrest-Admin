@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { format, startOfDay } from "date-fns";
+import { isNonPickupDelivery, isPickupDelivery } from "@/data/admin/orderClaim";
 import InventoryDayPicker from "../_components/InventoryDayPicker";
 
 async function safeReadJson<T>(res: Response): Promise<T> {
@@ -35,6 +36,7 @@ type OutOrderDetail = {
   sourceDate: string;
   distributorName: string;
   shippingFullName: string;
+  deliveryMethod: string;
   lines: Array<{
     kind: "package" | "subscription" | "repurchase";
     productName: string;
@@ -77,6 +79,7 @@ export default function InventoryPage() {
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [outDetails, setOutDetails] = useState<OutOrderDetail[]>([]);
+  const [outByOrderDeliveryFilter, setOutByOrderDeliveryFilter] = useState<"All" | "Pickup" | "Delivery">("All");
   const [dayTotals, setDayTotals] = useState<{ deliveryIn: number; out: number } | null>(null);
 
   const load = useCallback(async () => {
@@ -167,6 +170,16 @@ export default function InventoryPage() {
 
   const lineKindLabel = (k: OutOrderDetail["lines"][0]["kind"]) =>
     k === "package" ? "Package" : k === "subscription" ? "Subscription" : "Repurchase";
+
+  const deliveryMethodLabel = (dm: string) => (isPickupDelivery(dm) ? "Pick up" : "Delivery");
+
+  const filteredOutDetails = useMemo(() => {
+    if (outByOrderDeliveryFilter === "All") return outDetails;
+    return outDetails.filter((o) => {
+      const dm = o.deliveryMethod ?? "";
+      return outByOrderDeliveryFilter === "Pickup" ? isPickupDelivery(dm) : isNonPickupDelivery(dm);
+    });
+  }, [outDetails, outByOrderDeliveryFilter]);
 
   const saveEnding = async () => {
     if (!dayDescription || !/^\d{4}-\d{2}-\d{2}$/.test(dayDescription)) return;
@@ -427,10 +440,26 @@ export default function InventoryPage() {
       </div>
 
       <div className="mt-6">
-        <div className="text-sm font-semibold text-zinc-200">Out — by order ({dayDescription || "—"})</div>
-        <p className="mt-1 text-xs text-zinc-500">
-          Each row is a claimed order with effective date on this day. Line types: package, subscription, or repurchase.
-        </p>
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <div className="text-sm font-semibold text-zinc-200">Out — by order ({dayDescription || "—"})</div>
+            <p className="mt-1 text-xs text-zinc-500">
+              Each row is a claimed order with effective date on this day. Line types: package, subscription, or repurchase.
+            </p>
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-zinc-400">Delivery method</div>
+            <select
+              value={outByOrderDeliveryFilter}
+              onChange={(e) => setOutByOrderDeliveryFilter(e.target.value as "All" | "Pickup" | "Delivery")}
+              className="admin-select mt-1 min-w-[10rem]"
+            >
+              <option value="All">All</option>
+              <option value="Pickup">Pick up</option>
+              <option value="Delivery">Delivery</option>
+            </select>
+          </div>
+        </div>
         <div className="admin-table-wrap mt-2 max-h-96 overflow-auto">
           <table className="min-w-full text-xs">
             <thead className="sticky top-0 bg-black/40 text-zinc-300">
@@ -441,17 +470,20 @@ export default function InventoryPage() {
                 <th className="px-3 py-2 text-left">Distributor</th>
                 <th className="px-3 py-2 text-left">Shipping full name</th>
                 <th className="px-3 py-2 text-left">Lines</th>
+                <th className="px-3 py-2 text-left whitespace-nowrap">Delivery method</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
-              {outDetails.length === 0 ? (
+              {filteredOutDetails.length === 0 ? (
                 <tr>
                   <td className="px-3 py-3 text-zinc-500" colSpan={7}>
-                    No claimed out orders for this effective date.
+                    {outDetails.length === 0
+                      ? "No claimed out orders for this effective date."
+                      : "No orders match the delivery method filter."}
                   </td>
                 </tr>
               ) : (
-                outDetails.map((o) => (
+                filteredOutDetails.map((o) => (
                   <tr key={`${o.invoiceNumber}-${o.effectiveDate}`} className="align-top bg-black/10 text-zinc-100">
                     <td className="px-3 py-2 font-medium">{o.invoiceNumber}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-zinc-400">{o.effectiveDate}</td>
@@ -468,6 +500,7 @@ export default function InventoryPage() {
                         ))}
                       </ul>
                     </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-zinc-200">{deliveryMethodLabel(o.deliveryMethod)}</td>
                   </tr>
                 ))
               )}
