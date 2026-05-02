@@ -3,7 +3,7 @@ import { mergeOrderRowWithAdjustment } from "@/data/admin/orderAdjustmentMerge";
 import { resolvePackageNameFromPrice } from "@/data/admin/packageResolve";
 import { readOrdersDayAsync } from "@/data/admin/orders";
 import { loadAdminSettings, loadOrderAdjustments, loadOrderClaims, loadOrdersIndex } from "@/data/admin/storage";
-import { orderRowMatchesSearchQuery } from "@/lib/orderSearchMatch";
+import { orderRowMatchesSearchQuery, orderSearchFieldsFromRecord, stringifySearchField } from "@/lib/orderSearchMatch";
 import { requireApiAnyPermission } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +34,7 @@ export async function GET(req: Request) {
   const q = qRaw.toLowerCase();
   if (!q) return NextResponse.json({ rows: [], count: 0, q: qRaw, claims: loadOrderClaims() });
 
-  const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit") ?? 200) || 200));
+  const limit = Math.min(2000, Math.max(1, Number(url.searchParams.get("limit") ?? 500) || 500));
 
   const index = loadOrdersIndex();
   const adjustments = loadOrderAdjustments();
@@ -44,11 +44,11 @@ export async function GET(req: Request) {
   const rows: Array<Record<string, unknown>> = [];
 
   const startedAt = Date.now();
-  const maxMs = Math.min(8000, Math.max(800, Number(url.searchParams.get("maxMs") ?? 3200) || 3200));
+  const maxMs = Math.min(15000, Math.max(800, Number(url.searchParams.get("maxMs") ?? 10000) || 10000));
   let scannedDays = 0;
   const dates = index.map((i) => i.date).sort((a, b) => b.localeCompare(a));
 
-  const batchSize = 8;
+  const batchSize = 16;
   outer: for (let bi = 0; bi < dates.length; bi += batchSize) {
     if (rows.length >= limit) break outer;
     if (Date.now() - startedAt > maxMs) break outer;
@@ -79,22 +79,12 @@ export async function GET(req: Request) {
         if (typeof r !== "object" || r === null) continue;
         const rec = r as Record<string, unknown>;
 
-        const invoiceNumber = typeof rec["invoiceNumber"] === "string" ? (rec["invoiceNumber"] as string).trim() : "";
-        if (!invoiceNumber) continue;
-
-        const adj = adjustments[invoiceNumber];
+        const invoiceKey = stringifySearchField(rec["invoiceNumber"]);
+        const adj = invoiceKey ? adjustments[invoiceKey] : undefined;
         const mergedRec = mergeOrderRowWithAdjustment(rec as Record<string, unknown>, adj);
         const effectiveDate = adj?.effectiveDate ?? sourceDate;
 
-        if (
-          !orderRowMatchesSearchQuery(qRaw, {
-            distributorId: typeof mergedRec["distributorId"] === "string" ? mergedRec["distributorId"] : "",
-            distributorName: typeof mergedRec["distributorName"] === "string" ? mergedRec["distributorName"] : "",
-            shippingFullName: typeof mergedRec["shippingFullName"] === "string" ? mergedRec["shippingFullName"] : "",
-            ordererName: typeof mergedRec["ordererName"] === "string" ? mergedRec["ordererName"] : "",
-            invoiceNumber,
-          })
-        ) {
+        if (!orderRowMatchesSearchQuery(qRaw, orderSearchFieldsFromRecord(mergedRec))) {
           continue;
         }
 

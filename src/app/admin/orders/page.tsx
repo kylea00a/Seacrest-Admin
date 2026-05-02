@@ -17,7 +17,7 @@ import {
 } from "@/data/admin/orderClaim";
 import type { OrderClaimRecord } from "@/data/admin/types";
 import { useAdminSession } from "../AdminSessionContext";
-import { orderRowMatchesSearchQuery } from "@/lib/orderSearchMatch";
+import { orderRowMatchesSearchQuery, orderSearchFieldsFromRecord } from "@/lib/orderSearchMatch";
 
 async function safeReadJson<T>(res: Response): Promise<T> {
   const text = await res.text();
@@ -467,7 +467,7 @@ export default function OrdersPage() {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ q, limit: "500", maxMs: "5000" });
+      const qs = new URLSearchParams({ q, limit: "1500", maxMs: "12000" });
       const res = await fetch(`/api/admin/orders/search?${qs.toString()}`, { cache: "no-store" });
       const json = await safeReadJson<{
         rows?: Array<ParsedRow & { date: string }>;
@@ -820,13 +820,7 @@ export default function OrdersPage() {
       if (!matchesStatus) return false;
       if (!search.trim()) return true;
 
-      return orderRowMatchesSearchQuery(search, {
-        distributorId: r.distributorId,
-        distributorName: r.distributorName,
-        shippingFullName: r.shippingFullName,
-        ordererName: r.ordererName,
-        invoiceNumber: r.invoiceNumber,
-      });
+      return orderRowMatchesSearchQuery(search, orderSearchFieldsFromRecord(r as unknown as Record<string, unknown>));
     });
   }, [rows, statusFilter, search]);
 
