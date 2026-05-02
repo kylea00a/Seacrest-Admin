@@ -57,6 +57,7 @@ const ALL_SECTIONS: DockSection[] = [
       { key: "orders", label: "All Orders", href: "/admin/orders", perm: "orders" },
       { key: "inventory", label: "Inventory", href: "/admin/inventory", perm: "inventory" },
       { key: "delivery", label: "Delivery", href: "/admin/delivery", perm: "delivery" },
+      { key: "jnt-import", label: "J&T Import", href: "/admin/jnt-import", perm: "delivery" },
     ],
   },
   {

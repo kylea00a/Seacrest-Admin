@@ -60,6 +60,7 @@ export function adminPathToPermissionKey(pathname: string): AdminPermissionKey |
     orders: "orders",
     inventory: "inventory",
     delivery: "delivery",
+    "jnt-import": "delivery",
     settings: "settings",
     "packages-products": "packagesProducts",
   };

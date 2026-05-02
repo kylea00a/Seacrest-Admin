@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AdminSettings, OrdersImportSummary } from "@/data/admin/types";
+import type { AdminSettings, JntImportFile, OrdersImportSummary } from "@/data/admin/types";
 import {
   courierBucket,
   isPaidDeliveryOrder,
@@ -11,6 +11,7 @@ import {
   type DeliveryRowLike,
   type MergedDeliveryGroup,
 } from "@/data/admin/deliveryGrouping";
+import { findWaybillForReceiverDateRange } from "@/data/admin/jntImportMatch";
 import { useAdminProductKeys } from "../_components/useAdminProductKeys";
 import type { DeliveryTrackingMap } from "@/data/admin/storage";
 
@@ -49,6 +50,13 @@ function allTrackingSavedForGroup(
   return group.invoiceNumbers.every((inv) => Boolean(tracking[inv]?.trackingNumber));
 }
 
+function tableProductHeader(k: string): string {
+  if (k === "Radiance Coffee") return "SeaSkin Radiance";
+  if (k === "Seahealth Coffee") return "SeaHealth Coffee";
+  if (k === "Supreme") return "SeaSkin Supreme";
+  return k;
+}
+
 export default function DeliveryPage() {
   const productKeys = useAdminProductKeys();
   const [index, setIndex] = useState<OrdersImportSummary[]>([]);
@@ -63,6 +71,7 @@ export default function DeliveryPage() {
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [courierFilter, setCourierFilter] = useState<"all" | "jt" | "intl" | "none">("all");
   const [jntExportEnabled, setJntExportEnabled] = useState(false);
+  const [jntImport, setJntImport] = useState<JntImportFile | null>(null);
 
   const weightByProduct = useMemo(() => {
     const m: Record<string, number> = {};
@@ -93,13 +102,20 @@ export default function DeliveryPage() {
     setTracking(json.tracking ?? {});
   };
 
+  const loadJntImport = async () => {
+    const res = await fetch("/api/admin/jnt-import", { cache: "no-store" });
+    const json = (await res.json()) as JntImportFile & { error?: string };
+    if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
+    setJntImport(json);
+  };
+
   useEffect(() => {
     let cancelled = false;
     async function run() {
       setLoading(true);
       setError(null);
       try {
-        await Promise.all([loadIndex(), loadSettings(), loadTracking()]);
+        await Promise.all([loadIndex(), loadSettings(), loadTracking(), loadJntImport()]);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -151,8 +167,24 @@ export default function DeliveryPage() {
     if (courierFilter !== "jt") setJntExportEnabled(false);
   }, [courierFilter]);
 
+  const importWaybillByKey = useMemo(() => {
+    const rows = jntImport?.rows ?? [];
+    const start = startDate <= endDate ? startDate : endDate;
+    const end = startDate <= endDate ? endDate : startDate;
+    const map: Record<string, string> = {};
+    if (courierFilter !== "jt") return map;
+    for (const g of groups) {
+      const w = findWaybillForReceiverDateRange(g.shippingFullName, start, end, rows);
+      if (w) map[g.key] = w;
+    }
+    return map;
+  }, [groups, jntImport, startDate, endDate, courierFilter]);
+
   const saveTrackingGroup = async (g: MergedDeliveryGroup) => {
-    const value = (draft[g.key] ?? "").trim();
+    const imp = importWaybillByKey[g.key];
+    const userEdited = Object.prototype.hasOwnProperty.call(draft, g.key);
+    const typed = userEdited ? (draft[g.key] ?? "").trim() : "";
+    const value = typed || (imp ?? "").trim();
     if (!value) return;
     setSavingKey(g.key);
     setError(null);
@@ -208,6 +240,38 @@ export default function DeliveryPage() {
     }
   };
 
+  const exportPackingPdf = async () => {
+    if (courierFilter !== "jt" || !groups.length || !settings || productKeys.length === 0) return;
+    try {
+      const { buildPackingExportPdfBlob } = await import("@/lib/packingExportPdf");
+      const start = startDate <= endDate ? startDate : endDate;
+      const end = startDate <= endDate ? endDate : startDate;
+      const trackingByGroupKey: Record<string, string> = {};
+      for (const g of groups) {
+        const locked = allTrackingSavedForGroup(g, tracking);
+        const manual = locked ? (tracking[g.invoiceNumbers[0]!]?.trackingNumber ?? "").trim() : "";
+        const imp = importWaybillByKey[g.key] ?? "";
+        const v = manual || imp;
+        if (v) trackingByGroupKey[g.key] = v;
+      }
+      const blob = buildPackingExportPdfBlob({
+        startDateYmd: start,
+        endDateYmd: end,
+        courierLabel: "J&T",
+        productKeys,
+        groups,
+        trackingByGroupKey,
+      });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `packing-jt-${start}-to-${end}.pdf`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   return (
     <div className="admin-card">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -243,18 +307,28 @@ export default function DeliveryPage() {
                 onChange={(e) => setJntExportEnabled(e.target.checked)}
                 className="rounded border-white/20"
               />
-              J&amp;T export
+              J&amp;T export / Packing export
             </label>
           ) : null}
           {courierFilter === "jt" && jntExportEnabled ? (
-            <button
-              type="button"
-              onClick={() => void exportJntExcel()}
-              disabled={loading || !groups.length || !settings}
-              className="rounded-xl bg-amber-400 px-4 py-2 text-xs font-semibold text-amber-950 hover:bg-amber-300 disabled:opacity-60"
-            >
-              Download Excel
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void exportJntExcel()}
+                disabled={loading || !groups.length || !settings}
+                className="rounded-xl bg-amber-400 px-4 py-2 text-xs font-semibold text-amber-950 hover:bg-amber-300 disabled:opacity-60"
+              >
+                J&amp;T Excel
+              </button>
+              <button
+                type="button"
+                onClick={() => void exportPackingPdf()}
+                disabled={loading || !groups.length || !settings}
+                className="rounded-xl border border-amber-400/50 bg-amber-400/10 px-4 py-2 text-xs font-semibold text-amber-200 hover:bg-amber-400/20 disabled:opacity-60"
+              >
+                Packing PDF
+              </button>
+            </div>
           ) : null}
           <div>
             <div className="text-xs font-semibold text-zinc-400">Start date</div>
@@ -292,7 +366,7 @@ export default function DeliveryPage() {
               <th className="px-3 py-2 text-left">Receiver</th>
               {productKeys.map((k) => (
                 <th key={k} className="px-2 py-2 text-center whitespace-nowrap">
-                  {k === "Radiance Coffee" ? "SeaSkin Radiance" : k === "Seahealth Coffee" ? "SeaHealth Coffee" : k}
+                  {tableProductHeader(k)}
                 </th>
               ))}
               <th className="px-3 py-2 text-left">Contact #</th>
@@ -303,7 +377,11 @@ export default function DeliveryPage() {
           <tbody className="divide-y divide-white/10">
             {groups.map((g, i) => {
               const locked = allTrackingSavedForGroup(g, tracking);
+              const importWaybill = importWaybillByKey[g.key];
               const label = g.distributorNames.join(" · ");
+              const userEdited = Object.prototype.hasOwnProperty.call(draft, g.key);
+              const inputValue = userEdited ? (draft[g.key] ?? "") : (importWaybill ?? "");
+              const canSave = Boolean((userEdited ? (draft[g.key] ?? "").trim() : "") || (importWaybill ?? "").trim());
               return (
                 <tr key={g.key} className="bg-black/10 text-zinc-100">
                   <td className="px-3 py-2 whitespace-nowrap">{i + 1}</td>
@@ -324,21 +402,26 @@ export default function DeliveryPage() {
                         {tracking[g.invoiceNumbers[0]!]?.trackingNumber}
                       </span>
                     ) : (
-                      <div className="flex items-center gap-2">
-                        <input
-                          value={draft[g.key] ?? ""}
-                          onChange={(e) => setDraft((prev) => ({ ...prev, [g.key]: e.target.value }))}
-                          className="w-44 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-zinc-100 outline-none focus:border-emerald-500/60"
-                          placeholder="Enter tracking #"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => saveTrackingGroup(g)}
-                          disabled={savingKey === g.key || !(draft[g.key] ?? "").trim()}
-                          className="rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400 disabled:opacity-60"
-                        >
-                          {savingKey === g.key ? "Saving…" : "Save"}
-                        </button>
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          <input
+                            value={inputValue}
+                            onChange={(e) => setDraft((prev) => ({ ...prev, [g.key]: e.target.value }))}
+                            className="w-44 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-zinc-100 outline-none focus:border-emerald-500/60"
+                            placeholder={importWaybill ? importWaybill : "Enter tracking #"}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => saveTrackingGroup(g)}
+                            disabled={savingKey === g.key || !canSave}
+                            className="rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400 disabled:opacity-60"
+                          >
+                            {savingKey === g.key ? "Saving…" : "Save"}
+                          </button>
+                        </div>
+                        {importWaybill ? (
+                          <span className="text-[10px] text-zinc-500">Matched from J&amp;T import (same receiver + date)</span>
+                        ) : null}
                       </div>
                     )}
                   </td>

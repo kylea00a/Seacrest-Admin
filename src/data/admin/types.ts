@@ -253,6 +253,25 @@ export interface WalletTransactionsFile {
   rows: WalletTransactionRow[];
 }
 
+/** One row from J&T portal Excel export (columns mapped by header titles). */
+export interface JntImportRow {
+  id: string;
+  /** Waybill Number column */
+  waybillNumber: string;
+  receiver: string;
+  /** Parsed date used for matching delivery claim dates (YYYY-MM-DD). */
+  shipDateYmd: string;
+  /** Raw submission datetime for tie-breaking / debugging */
+  submissionTime?: string;
+  orderNumber?: string;
+}
+
+export interface JntImportFile {
+  importedAt: string;
+  filename: string;
+  rows: JntImportRow[];
+}
+
 export interface WalletPayoutReceipt {
   paid: boolean;
   receiptNumber: string;

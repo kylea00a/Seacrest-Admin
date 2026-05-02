@@ -16,6 +16,7 @@ import type {
   PettyCashState,
   PettyCashLedgerTransaction,
   Reminder,
+  JntImportFile,
 } from "./types";
 
 const PROJECT_ROOT = process.cwd();
@@ -35,6 +36,7 @@ const INVENTORY_SUPPLY_FILE = path.join(ADMIN_DATA_DIR, "inventorySupply.json");
 const INVENTORY_ENDING_FILE = path.join(ADMIN_DATA_DIR, "inventoryEnding.json");
 const CASH_LEDGER_FILE = path.join(ADMIN_DATA_DIR, "cashLedger.json");
 const REMINDERS_FILE = path.join(ADMIN_DATA_DIR, "reminders.json");
+const JNT_IMPORT_FILE = path.join(ADMIN_DATA_DIR, "jntImport.json");
 
 function ensureAdminDir() {
   if (!fs.existsSync(ADMIN_DATA_DIR)) fs.mkdirSync(ADMIN_DATA_DIR, { recursive: true });
@@ -328,5 +330,13 @@ export function loadInventoryEnding(): InventoryEndingFile {
 
 export function saveInventoryEnding(data: InventoryEndingFile) {
   writeJsonFile(INVENTORY_ENDING_FILE, data);
+}
+
+export function loadJntImport(): JntImportFile {
+  return readJsonFile<JntImportFile>(JNT_IMPORT_FILE, { importedAt: "", filename: "", rows: [] });
+}
+
+export function saveJntImport(data: JntImportFile) {
+  writeJsonFile(JNT_IMPORT_FILE, data);
 }
 
