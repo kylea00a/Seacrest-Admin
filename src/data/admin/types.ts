@@ -272,6 +272,14 @@ export interface JntImportFile {
   rows: JntImportRow[];
 }
 
+/** One saved J&T upload (listed in the import panel). */
+export interface JntImportIndexEntry {
+  id: string;
+  importedAt: string;
+  filename: string;
+  rowCount: number;
+}
+
 export interface WalletPayoutReceipt {
   paid: boolean;
   receiptNumber: string;

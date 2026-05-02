@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
-import { parseJntImportWorkbook } from "@/data/admin/jntImportParse";
-import { loadJntImport, saveJntImport } from "@/data/admin/storage";
+import {
+  deleteAllJntImports,
+  deleteJntImportById,
+  loadJntImportById,
+  loadJntImportIndex,
+  loadMergedJntImportRows,
+} from "@/data/admin/jntImportHistory";
 import { requireApiPermission } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
@@ -9,42 +14,43 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const auth = await requireApiPermission(req, "delivery");
   if (auth instanceof NextResponse) return auth;
-  const data = loadJntImport();
-  return NextResponse.json(data);
+  const url = new URL(req.url);
+  const id = url.searchParams.get("id");
+  if (id) {
+    const file = loadJntImportById(id);
+    if (!file) return NextResponse.json({ error: "Not found." }, { status: 404 });
+    return NextResponse.json({ file });
+  }
+
+  const imports = loadJntImportIndex();
+  const rows = loadMergedJntImportRows();
+  const latest = imports[0];
+  return NextResponse.json({
+    rows,
+    imports,
+    importedAt: latest?.importedAt ?? "",
+    filename:
+      imports.length === 0
+        ? ""
+        : imports.length === 1
+          ? (latest?.filename ?? "")
+          : `${imports.length} imports merged`,
+  });
 }
 
-export async function POST(req: Request) {
+export async function DELETE(req: Request) {
   const auth = await requireApiPermission(req, "delivery");
   if (auth instanceof NextResponse) return auth;
-  const form = await req.formData();
-  const file = form.get("file");
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: "Missing `file`." }, { status: 400 });
+  const url = new URL(req.url);
+  if (url.searchParams.get("all") === "1") {
+    const deleted = deleteAllJntImports();
+    return NextResponse.json({ ok: true, deleted });
   }
-
-  const buf = Buffer.from(await file.arrayBuffer());
-  let rows;
-  try {
-    rows = parseJntImportWorkbook(buf);
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Failed to parse Excel." },
-      { status: 400 },
-    );
+  const id = url.searchParams.get("id");
+  if (!id?.trim()) {
+    return NextResponse.json({ error: "Missing `id` or `all=1`." }, { status: 400 });
   }
-
-  const importedAt = new Date().toISOString();
-  const payload = {
-    importedAt,
-    filename: file.name || "jnt-import.xlsx",
-    rows,
-  };
-  saveJntImport(payload);
-
-  return NextResponse.json({
-    ok: true,
-    importedAt,
-    filename: payload.filename,
-    rowCount: rows.length,
-  });
+  const ok = deleteJntImportById(id.trim());
+  if (!ok) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  return NextResponse.json({ ok: true });
 }

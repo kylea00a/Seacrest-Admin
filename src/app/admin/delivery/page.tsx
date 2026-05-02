@@ -104,9 +104,13 @@ export default function DeliveryPage() {
 
   const loadJntImport = async () => {
     const res = await fetch("/api/admin/jnt-import", { cache: "no-store" });
-    const json = (await res.json()) as JntImportFile & { error?: string };
+    const json = (await res.json()) as JntImportFile & { imports?: unknown; error?: string };
     if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
-    setJntImport(json);
+    setJntImport({
+      importedAt: json.importedAt,
+      filename: json.filename,
+      rows: json.rows ?? [],
+    });
   };
 
   useEffect(() => {
