@@ -24,6 +24,43 @@ function fmtLongDateRange(startYmd: string, endYmd: string): string {
   }
 }
 
+/** Short label for summary text (e.g. Soap, Lotion). */
+function productShortLabel(productKey: string): string {
+  const full = productColumnLabel(productKey);
+  if (full.startsWith("Chips")) {
+    const m = full.match(/\(([^)]+)\)/);
+    return m ? m[1]!.trim() : full.replace(/^Chips\s*-?\s*/i, "").trim() || full;
+  }
+  return full.replace(/^SeaSkin\s+/i, "").trim() || full;
+}
+
+/** One order line: total pieces + human-readable breakdown. */
+function orderSummaryParts(
+  g: MergedDeliveryGroup,
+  productKeys: string[],
+): { totalPieces: number; phrase: string } {
+  const segments: string[] = [];
+  let totalPieces = 0;
+  for (const k of productKeys) {
+    const n = g.productTotals[k] ?? 0;
+    if (n <= 0) continue;
+    totalPieces += n;
+    const short = productShortLabel(k);
+    segments.push(`${n} ${short}`);
+  }
+  if (segments.length === 0) {
+    return { totalPieces: 0, phrase: "—" };
+  }
+  if (segments.length === 1) {
+    return { totalPieces, phrase: segments[0]! };
+  }
+  // e.g. "4 Soap and 2 Lotion" or "2 Soap, 1 Lotion and 3 Chips (BBQ)"
+  const last = segments.pop()!;
+  const phrase =
+    segments.length === 0 ? last : `${segments.join(", ")} and ${last}`;
+  return { totalPieces, phrase };
+}
+
 export type PackingPdfOpts = {
   startDateYmd: string;
   endDateYmd: string;
@@ -37,7 +74,7 @@ export type PackingPdfOpts = {
 export function buildPackingExportPdfBlob(opts: PackingPdfOpts): Blob {
   const { startDateYmd, endDateYmd, courierLabel, productKeys, groups, trackingByGroupKey } = opts;
 
-  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
 
   const dateStr = fmtLongDateRange(startDateYmd, endDateYmd);
@@ -52,7 +89,7 @@ export function buildPackingExportPdfBlob(opts: PackingPdfOpts): Blob {
   doc.text(COMPANY_NAME, pageW / 2, 14, { align: "center" });
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
-  const addrLines = doc.splitTextToSize(COMPANY_ADDRESS, pageW - 40);
+  const addrLines = doc.splitTextToSize(COMPANY_ADDRESS, pageW - 28);
   doc.text(addrLines, pageW / 2, 20, { align: "center" });
 
   const labels = productKeys.map(productColumnLabel);
@@ -84,7 +121,7 @@ export function buildPackingExportPdfBlob(opts: PackingPdfOpts): Blob {
     startY: 32,
     head,
     body,
-    styles: { fontSize: 7, cellPadding: 1.4, valign: "middle" },
+    styles: { fontSize: 6, cellPadding: 1, valign: "middle", overflow: "linebreak" },
     headStyles: {
       fillColor: [255, 243, 180],
       textColor: 20,
@@ -92,9 +129,11 @@ export function buildPackingExportPdfBlob(opts: PackingPdfOpts): Blob {
       halign: "center",
     },
     columnStyles: {
-      0: { halign: "center", cellWidth: 12 },
-      1: { cellWidth: 34, halign: "left" },
+      0: { halign: "center", cellWidth: 9 },
+      1: { cellWidth: 26, halign: "left" },
     },
+    margin: { left: 10, right: 10 },
+    tableWidth: pageW - 20,
     didParseCell: (data) => {
       if (data.section === "body" && data.row.index === 0) {
         data.cell.styles.fillColor = [240, 240, 240];
@@ -109,34 +148,36 @@ export function buildPackingExportPdfBlob(opts: PackingPdfOpts): Blob {
   const lastY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? 200;
   let y = lastY + 8;
 
-  if (y > doc.internal.pageSize.getHeight() - 30) {
+  if (y > doc.internal.pageSize.getHeight() - 40) {
     doc.addPage();
     y = 20;
   }
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
-  doc.text("Summary", 14, y);
+  doc.text("Summary (by order)", 14, y);
   y += 5;
 
-  const totalPackages = columnTotals.reduce((a, b) => a + b, 0);
-  const summaryBody: (string | number)[][] = [
-    [totalPackages, "Package/s of", "All line items (see table)"],
-    ...productKeys
-      .map((k, i) => {
-        const n = columnTotals[i] ?? 0;
-        if (n <= 0) return null;
-        return [n, "Package/s of", `${n} × ${productColumnLabel(k)}`];
-      })
-      .filter((r): r is (string | number)[] => r != null),
-  ];
+  /** One row per delivery group: total pieces + breakdown like sample (5 packages … / 2 packages …). */
+  const summaryBody: (string | number)[][] = groups.map((g) => {
+    const { totalPieces, phrase } = orderSummaryParts(g, productKeys);
+    const desc = `${g.shippingFullName}: ${phrase}`;
+    return [totalPieces || "—", "Package/s of", desc];
+  });
 
   autoTable(doc, {
     startY: y,
     head: [["Total Package", "UOM", "Description"]],
     body: summaryBody,
-    styles: { fontSize: 8, cellPadding: 1.2 },
+    styles: { fontSize: 8, cellPadding: 1.2, overflow: "linebreak" },
     headStyles: { fillColor: [220, 220, 220], fontStyle: "bold" },
+    columnStyles: {
+      0: { cellWidth: 22, halign: "center" },
+      1: { cellWidth: 28 },
+      2: { cellWidth: "auto" },
+    },
+    margin: { left: 10, right: 10 },
+    tableWidth: pageW - 20,
   });
 
   return doc.output("blob");
