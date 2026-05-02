@@ -44,11 +44,17 @@ function todayISO() {
   return `${y}-${m}-${day}`;
 }
 
-function allTrackingSavedForGroup(
-  group: MergedDeliveryGroup,
+/** Resolve displayed tracking: J&amp;T import match first, then saved manual value (legacy). */
+function trackingDisplayForGroup(
+  g: MergedDeliveryGroup,
+  importWaybill: string | undefined,
   tracking: DeliveryTrackingMap,
-): boolean {
-  return group.invoiceNumbers.every((inv) => Boolean(tracking[inv]?.trackingNumber));
+): string {
+  const imp = (importWaybill ?? "").trim();
+  if (imp) return imp;
+  const inv = g.invoiceNumbers[0];
+  if (!inv) return "";
+  return (tracking[inv]?.trackingNumber ?? "").trim();
 }
 
 export default function DeliveryPage() {
@@ -61,8 +67,6 @@ export default function DeliveryPage() {
   const [tracking, setTracking] = useState<DeliveryTrackingMap>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [savingKey, setSavingKey] = useState<string>("");
-  const [draft, setDraft] = useState<Record<string, string>>({});
   const [courierFilter, setCourierFilter] = useState<"all" | "jt" | "intl" | "none">("all");
   const [jntExportEnabled, setJntExportEnabled] = useState(false);
   const [jntImport, setJntImport] = useState<JntImportFile | null>(null);
@@ -184,38 +188,6 @@ export default function DeliveryPage() {
     [groups, productKeys],
   );
 
-  const saveTrackingGroup = async (g: MergedDeliveryGroup) => {
-    const imp = importWaybillByKey[g.key];
-    const userEdited = Object.prototype.hasOwnProperty.call(draft, g.key);
-    const typed = userEdited ? (draft[g.key] ?? "").trim() : "";
-    const value = typed || (imp ?? "").trim();
-    if (!value) return;
-    setSavingKey(g.key);
-    setError(null);
-    try {
-      for (const invoiceNumber of g.invoiceNumbers) {
-        const res = await fetch("/api/admin/delivery/tracking", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ invoiceNumber, trackingNumber: value }),
-        });
-        const json = (await res.json()) as { ok?: boolean; tracking?: { trackingNumber: string }; error?: string };
-        if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
-        setTracking((prev) => ({
-          ...prev,
-          [invoiceNumber]: {
-            trackingNumber: json.tracking?.trackingNumber ?? value,
-            savedAt: new Date().toISOString(),
-          },
-        }));
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSavingKey("");
-    }
-  };
-
   const exportJntExcel = async () => {
     if (courierFilter !== "jt" || !jntExportEnabled || !settings) return;
     try {
@@ -252,10 +224,7 @@ export default function DeliveryPage() {
       const end = startDate <= endDate ? endDate : startDate;
       const trackingByGroupKey: Record<string, string> = {};
       for (const g of groups) {
-        const locked = allTrackingSavedForGroup(g, tracking);
-        const manual = locked ? (tracking[g.invoiceNumbers[0]!]?.trackingNumber ?? "").trim() : "";
-        const imp = importWaybillByKey[g.key] ?? "";
-        const v = manual || imp;
+        const v = trackingDisplayForGroup(g, importWaybillByKey[g.key], tracking);
         if (v) trackingByGroupKey[g.key] = v;
       }
       const blob = buildPackingExportPdfBlob({
@@ -393,12 +362,10 @@ export default function DeliveryPage() {
               </tr>
             ) : null}
             {groups.map((g, i) => {
-              const locked = allTrackingSavedForGroup(g, tracking);
               const importWaybill = importWaybillByKey[g.key];
               const label = g.distributorNames.join(" · ");
-              const userEdited = Object.prototype.hasOwnProperty.call(draft, g.key);
-              const inputValue = userEdited ? (draft[g.key] ?? "") : (importWaybill ?? "");
-              const canSave = Boolean((userEdited ? (draft[g.key] ?? "").trim() : "") || (importWaybill ?? "").trim());
+              const displayTracking = trackingDisplayForGroup(g, importWaybill, tracking);
+              const impTrim = (importWaybill ?? "").trim();
               return (
                 <tr key={g.key} className="bg-black/10 text-zinc-100">
                   <td className="px-3 py-2 whitespace-nowrap">{i + 1}</td>
@@ -408,33 +375,18 @@ export default function DeliveryPage() {
                       {g.productTotals?.[k] ? g.productTotals[k] : ""}
                     </td>
                   ))}
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    {locked ? (
-                      <span className="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-xs text-zinc-200">
-                        {tracking[g.invoiceNumbers[0]!]?.trackingNumber}
-                      </span>
-                    ) : (
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2">
-                          <input
-                            value={inputValue}
-                            onChange={(e) => setDraft((prev) => ({ ...prev, [g.key]: e.target.value }))}
-                            className="w-44 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-zinc-100 outline-none focus:border-emerald-500/60"
-                            placeholder={importWaybill ? importWaybill : "Enter tracking #"}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => saveTrackingGroup(g)}
-                            disabled={savingKey === g.key || !canSave}
-                            className="rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400 disabled:opacity-60"
-                          >
-                            {savingKey === g.key ? "Saving…" : "Save"}
-                          </button>
-                        </div>
-                        {importWaybill ? (
-                          <span className="text-[10px] text-zinc-500">Matched from J&amp;T import (same receiver + date)</span>
+                  <td className="px-3 py-2 whitespace-nowrap align-top">
+                    {displayTracking ? (
+                      <div className="flex flex-col gap-0.5">
+                        <span className="rounded-lg border border-white/10 bg-black/20 px-2 py-1 font-mono text-[11px] text-zinc-200">
+                          {displayTracking}
+                        </span>
+                        {impTrim && displayTracking === impTrim ? (
+                          <span className="text-[10px] text-zinc-500">From J&amp;T import</span>
                         ) : null}
                       </div>
+                    ) : (
+                      <span className="text-zinc-500">—</span>
                     )}
                   </td>
                   <td className="max-w-[14rem] px-3 py-2 text-sm leading-snug text-zinc-200" title={label}>
