@@ -377,6 +377,7 @@ export default function OrdersPage() {
   const [tablePage, setTablePage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState<10 | 25 | 50>(10);
   const [statusFilter, setStatusFilter] = useState<"All" | "Paid" | "Pending" | "Processing" | "Cancelled">("All");
+  const [deliveryMethodFilter, setDeliveryMethodFilter] = useState<"All" | "Pickup" | "Delivery">("All");
   const [search, setSearch] = useState("");
   const [pkgProductsOpen, setPkgProductsOpen] = useState(false);
   const [subProductsOpen, setSubProductsOpen] = useState(false);
@@ -516,7 +517,7 @@ export default function OrdersPage() {
   /** Reset pagination when filters/range change — not when `rows` refetches (e.g. after saving a line edit). */
   useEffect(() => {
     setTablePage(1);
-  }, [search, statusFilter, rowsPerPage, startDate, endDate, index.length]);
+  }, [search, statusFilter, deliveryMethodFilter, rowsPerPage, startDate, endDate, index.length]);
 
   const [statusDraft, setStatusDraft] = useState<Record<string, StatusOption>>({});
   const [savingStatus, setSavingStatus] = useState<string>("");
@@ -818,11 +819,21 @@ export default function OrdersPage() {
                 : s.includes("cancel");
 
       if (!matchesStatus) return false;
+
+      const dm = r.deliveryMethod ?? "";
+      const matchesDeliveryMethod =
+        deliveryMethodFilter === "All"
+          ? true
+          : deliveryMethodFilter === "Pickup"
+            ? isPickupDelivery(dm)
+            : isNonPickupDelivery(dm);
+      if (!matchesDeliveryMethod) return false;
+
       if (!search.trim()) return true;
 
       return orderInvoiceMatchesSearch(search, r.invoiceNumber);
     });
-  }, [rows, statusFilter, search]);
+  }, [rows, statusFilter, deliveryMethodFilter, search]);
 
   const tableTotalPages = useMemo(
     () => Math.max(1, Math.ceil(filteredRows.length / rowsPerPage)),
@@ -878,6 +889,18 @@ export default function OrdersPage() {
               <option value="Pending">Pending</option>
               <option value="Processing">Processing</option>
               <option value="Cancelled">Cancelled</option>
+            </select>
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-zinc-400">Delivery method</div>
+            <select
+              value={deliveryMethodFilter}
+              onChange={(e) => setDeliveryMethodFilter(e.target.value as "All" | "Pickup" | "Delivery")}
+              className="mt-1 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500/60"
+            >
+              <option value="All">All</option>
+              <option value="Pickup">Pick up</option>
+              <option value="Delivery">Delivery</option>
             </select>
           </div>
           <div>
