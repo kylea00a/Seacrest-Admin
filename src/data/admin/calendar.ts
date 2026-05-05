@@ -20,6 +20,7 @@ export function buildCalendarEventsForMonth(params: {
   const events: CalendarEvent[] = [];
 
   for (const expense of expenses) {
+    if (expense.isRequest && expense.requestStatus !== "pending") continue;
     const occurrences = getExpenseOccurrencesInRange(expense, start, end);
     const dept = expense.departmentId ? deptById.get(expense.departmentId) : undefined;
     const departmentName = dept?.name ?? "General";

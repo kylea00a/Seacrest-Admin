@@ -46,6 +46,13 @@ export interface Expense {
   departmentId?: string;
   notes?: string;
   paymentStatus?: PaymentStatus; // if omitted, treated as "unpaid"
+  /**
+   * If true, this expense was created as a request (employee-submitted) and must be approved (paid) or rejected.
+   * Calendar only shows requested expenses while pending.
+   */
+  isRequest?: boolean;
+  requestStatus?: "pending" | "rejected";
+  requestedBy?: string;
   createdAt: string; // ISO
 }
 

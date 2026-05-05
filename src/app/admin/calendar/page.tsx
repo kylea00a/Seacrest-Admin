@@ -80,7 +80,7 @@ export default function CalendarPage() {
   }, []);
 
   const [selectedDate, setSelectedDate] = useState<string>("");
-  const [showPaid, setShowPaid] = useState(true);
+  const [showPaid, setShowPaid] = useState(false);
   const [showUnpaid, setShowUnpaid] = useState(true);
 
   useEffect(() => {
@@ -116,9 +116,28 @@ export default function CalendarPage() {
     };
   }, [year, month]);
 
+  const allEvents = useMemo(() => {
+    const pettyEvents: CalendarEvent[] = pettyPending.map((r) => {
+      const id = String(r["id"] ?? "");
+      const date = String(r["dateRequested"] ?? "");
+      return {
+        date,
+        expenseId: `petty:${id}`,
+        title: String(r["description"] ?? "Petty cash request"),
+        amount: Number(r["amount"] ?? 0) || 0,
+        category: String(r["category"] ?? "Petty Cash"),
+        departmentName: String(r["employeeName"] ?? "Petty Cash"),
+        frequency: "once",
+        paymentStatus: "unpaid",
+        kind: "pettyCash",
+      };
+    });
+    return [...events, ...pettyEvents];
+  }, [events, pettyPending]);
+
   const visibleEvents = useMemo(() => {
-    return events.filter((ev) => (ev.paymentStatus === "paid" ? showPaid : showUnpaid));
-  }, [events, showPaid, showUnpaid]);
+    return allEvents.filter((ev) => (ev.paymentStatus === "paid" ? showPaid : showUnpaid));
+  }, [allEvents, showPaid, showUnpaid]);
 
   const eventsByDate = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
@@ -149,10 +168,6 @@ export default function CalendarPage() {
   }, [year, month]);
 
   const selectedEvents = selectedDate ? eventsByDate.get(selectedDate) ?? [] : [];
-  const selectedPettyPending = useMemo(() => {
-    if (!selectedDate) return [];
-    return pettyPending.filter((r) => String(r["dateRequested"] ?? "") === selectedDate);
-  }, [pettyPending, selectedDate]);
   const monthTotals = useMemo(() => {
     const totalsByCategory = new Map<string, number>();
     for (const ev of visibleEvents)
@@ -198,6 +213,49 @@ export default function CalendarPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingExpenseId("");
+    }
+  };
+
+  const rejectExpenseRequest = async (expenseId: string) => {
+    setSavingExpenseId(expenseId);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/expenses/payment-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expenseId, action: "reject" }),
+      });
+      const json = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
+      const r2 = await fetch(`/api/admin/calendar?year=${year}&month=${month}`, { cache: "no-store" });
+      const j2 = (await r2.json()) as any;
+      setEvents(j2.events ?? []);
+      setInventoryDiscrepancyDates(new Set((j2.inventoryDiscrepancyDates ?? []).filter(Boolean)));
+      setPettyPending(Array.isArray(j2.pettyPending) ? j2.pettyPending : []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingExpenseId("");
+    }
+  };
+
+  const decidePetty = async (requestId: string, action: "approve" | "reject") => {
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/petty-cash?action=decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId, action, decidedBy: account?.displayName || "Superadmin" }),
+      });
+      const j = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(j.error ?? `Failed (${res.status})`);
+      const r2 = await fetch(`/api/admin/calendar?year=${year}&month=${month}`, { cache: "no-store" });
+      const j2 = (await r2.json()) as any;
+      setEvents(j2.events ?? []);
+      setInventoryDiscrepancyDates(new Set((j2.inventoryDiscrepancyDates ?? []).filter(Boolean)));
+      setPettyPending(Array.isArray(j2.pettyPending) ? j2.pettyPending : []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -335,7 +393,34 @@ export default function CalendarPage() {
                 </div>
                 <div className="text-xs font-bold text-white">{ev.amount ? currency(ev.amount) : ""}</div>
               </div>
-              {ev.kind === "reminder" ? (
+              {ev.kind === "pettyCash" ? (
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <div className="text-[10px] font-semibold text-zinc-300">Type</div>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full border border-white/15 bg-white/10 px-1.5 py-0.5 text-[9px] font-bold text-zinc-200">
+                      Petty cash request
+                    </span>
+                    {account?.isSuperadmin ? (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="admin-btn-primary px-2 py-1 text-[11px]"
+                          onClick={() => void decidePetty(ev.expenseId.replace(/^petty:/, ""), "approve")}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          className="admin-btn-secondary px-2 py-1 text-[11px]"
+                          onClick={() => void decidePetty(ev.expenseId.replace(/^petty:/, ""), "reject")}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : ev.kind === "reminder" ? (
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <div className="text-[10px] font-semibold text-zinc-300">Type</div>
                   <span className="rounded-full border border-white/15 bg-white/10 px-1.5 py-0.5 text-[9px] font-bold text-zinc-200">
@@ -348,12 +433,11 @@ export default function CalendarPage() {
                   {ev.paymentStatus === "paid" ? (
                     <button
                       type="button"
-                      onClick={() => void togglePaid(ev)}
-                      disabled={savingExpenseId === ev.expenseId}
+                      disabled
                       className={statusChipClass(ev.paymentStatus)}
-                      title="Click to toggle paid/unpaid"
+                      title="Paid items are read-only in calendar"
                     >
-                      {savingExpenseId === ev.expenseId ? "Saving…" : "Paid"}
+                      Paid
                     </button>
                   ) : (
                     <div className="flex items-center gap-2">
@@ -384,88 +468,23 @@ export default function CalendarPage() {
                       >
                         {savingExpenseId === ev.expenseId ? "Saving…" : "Pay"}
                       </button>
+                      {account?.isSuperadmin ? (
+                        <button
+                          type="button"
+                          disabled={savingExpenseId === ev.expenseId}
+                          onClick={() => void rejectExpenseRequest(ev.expenseId)}
+                          className="admin-btn-secondary px-2 py-1 text-[11px]"
+                          title="Reject request"
+                        >
+                          Reject
+                        </button>
+                      ) : null}
                     </div>
                   )}
                 </div>
               )}
             </div>
           ))}
-          {selectedDate && selectedPettyPending.length > 0 ? (
-            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-              <div className="text-xs font-bold text-white">Pending petty cash requests</div>
-              <div className="mt-2 space-y-2">
-                {selectedPettyPending.map((r) => (
-                  <div key={String(r["id"] ?? "")} className="rounded-lg border border-white/10 bg-black/20 p-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="truncate text-xs font-semibold text-zinc-100">
-                          {String(r["description"] ?? "")} — {currency(Number(r["amount"] ?? 0))}
-                        </div>
-                        <div className="mt-0.5 text-[11px] text-zinc-400">
-                          {String(r["employeeName"] ?? "")} • {String(r["category"] ?? "")} • {String(r["requestType"] ?? "budget")}
-                        </div>
-                      </div>
-                      {account?.isSuperadmin ? (
-                        <div className="flex shrink-0 items-center gap-2">
-                          <button
-                            type="button"
-                            className="admin-btn-primary px-2 py-1 text-[11px]"
-                            onClick={async () => {
-                              setError(null);
-                              try {
-                                const res = await fetch("/api/admin/petty-cash?action=decide", {
-                                  method: "POST",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({ requestId: r["id"], action: "approve", decidedBy: account.displayName || "Superadmin" }),
-                                });
-                                const j = (await res.json()) as { error?: string };
-                                if (!res.ok) throw new Error(j.error ?? `Failed (${res.status})`);
-                                // Reload month
-                                const r2 = await fetch(`/api/admin/calendar?year=${year}&month=${month}`, { cache: "no-store" });
-                                const j2 = (await r2.json()) as any;
-                                setEvents(j2.events ?? []);
-                                setInventoryDiscrepancyDates(new Set((j2.inventoryDiscrepancyDates ?? []).filter(Boolean)));
-                                setPettyPending(Array.isArray(j2.pettyPending) ? j2.pettyPending : []);
-                              } catch (e) {
-                                setError(e instanceof Error ? e.message : String(e));
-                              }
-                            }}
-                          >
-                            Approve
-                          </button>
-                          <button
-                            type="button"
-                            className="admin-btn-secondary px-2 py-1 text-[11px]"
-                            onClick={async () => {
-                              setError(null);
-                              try {
-                                const res = await fetch("/api/admin/petty-cash?action=decide", {
-                                  method: "POST",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({ requestId: r["id"], action: "reject", decidedBy: account.displayName || "Superadmin" }),
-                                });
-                                const j = (await res.json()) as { error?: string };
-                                if (!res.ok) throw new Error(j.error ?? `Failed (${res.status})`);
-                                const r2 = await fetch(`/api/admin/calendar?year=${year}&month=${month}`, { cache: "no-store" });
-                                const j2 = (await r2.json()) as any;
-                                setEvents(j2.events ?? []);
-                                setInventoryDiscrepancyDates(new Set((j2.inventoryDiscrepancyDates ?? []).filter(Boolean)));
-                                setPettyPending(Array.isArray(j2.pettyPending) ? j2.pettyPending : []);
-                              } catch (e) {
-                                setError(e instanceof Error ? e.message : String(e));
-                              }
-                            }}
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
         </div>
 
         <div className="mt-5 border-t border-white/10 pt-4">

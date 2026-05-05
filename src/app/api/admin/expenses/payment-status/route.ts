@@ -28,19 +28,37 @@ export async function POST(req: Request) {
     expenseId?: unknown;
     paymentStatus?: unknown;
     deductFrom?: unknown;
+    action?: unknown;
   };
   const expenseId = typeof body.expenseId === "string" ? body.expenseId.trim() : "";
   if (!expenseId) return NextResponse.json({ error: "Missing `expenseId`." }, { status: 400 });
-  if (!isPaymentStatus(body.paymentStatus)) {
+  const action = typeof body.action === "string" ? body.action.trim() : "";
+  if (action !== "reject" && !isPaymentStatus(body.paymentStatus)) {
     return NextResponse.json({ error: "Missing/invalid `paymentStatus`." }, { status: 400 });
   }
+  const desiredStatus: PaymentStatus | null = action === "reject" ? null : (body.paymentStatus as PaymentStatus);
 
   const expenses = loadExpenses();
   const idx = expenses.findIndex((e) => e.id === expenseId);
   if (idx < 0) return NextResponse.json({ error: "Expense not found." }, { status: 404 });
 
   const prev = expenses[idx];
-  const next = { ...expenses[idx], paymentStatus: body.paymentStatus };
+  if (action === "reject") {
+    if (!prev.isRequest) return NextResponse.json({ error: "Only requested expenses can be rejected." }, { status: 400 });
+    const next = { ...prev, requestStatus: "rejected" as const };
+    expenses[idx] = next;
+    saveExpenses(expenses);
+    return NextResponse.json({ ok: true, expense: next });
+  }
+
+  if (prev.paymentStatus === "paid" && desiredStatus === "unpaid") {
+    return NextResponse.json(
+      { error: "Paid expenses cannot be toggled back to unpaid from the calendar. Edit it in the Expenses page instead." },
+      { status: 400 },
+    );
+  }
+
+  const next = { ...expenses[idx], paymentStatus: desiredStatus as PaymentStatus };
   expenses[idx] = next;
   saveExpenses(expenses);
 
@@ -51,7 +69,7 @@ export async function POST(req: Request) {
   const deductType = typeof deduct?.type === "string" ? (deduct.type as string) : "";
   const deductAccountId = typeof deduct?.accountId === "string" ? (deduct.accountId as string).trim() : "";
 
-  if (body.paymentStatus === "paid") {
+  if (desiredStatus === "paid") {
     if (deductType !== "pettyCash" && deductType !== "bank") {
       return NextResponse.json({ error: "Missing `deductFrom` (pettyCash|bank) when marking paid." }, { status: 400 });
     }
@@ -105,21 +123,7 @@ export async function POST(req: Request) {
     }
   }
 
-  if (body.paymentStatus === "unpaid" && prev.paymentStatus === "paid") {
-    // Remove SOA entries for this expenseId if toggled back.
-    const file = loadCashLedger();
-    const before = file.transactions.length;
-    file.transactions = file.transactions.filter((t) => !(t.kind === "bill_payment" && t.expenseId === expenseId));
-    if (file.transactions.length !== before) saveCashLedger(file);
-    const ledger = loadPettyCashLedger();
-    const nextLedger = ledger.filter((t) => !(t.kind === "bill_payment" && t.expenseId === expenseId));
-    if (nextLedger.length !== ledger.length) {
-      savePettyCashLedger(nextLedger);
-      const bal = nextLedger.reduce((acc, t) => acc + (t.credit ?? 0) - (t.debit ?? 0), 0);
-      const s = loadPettyCashState();
-      savePettyCashState({ balance: bal, updatedAt: s.updatedAt });
-    }
-  }
+  // Note: toggling paid -> unpaid is blocked (see above).
 
   return NextResponse.json({ ok: true, expense: next });
 }

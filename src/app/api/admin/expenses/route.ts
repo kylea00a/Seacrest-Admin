@@ -110,6 +110,8 @@ export async function POST(req: Request) {
   const repeatEveryMonths = frequency === "customMonths" ? toPositiveIntOrNull(body.repeatEveryMonths) ?? 1 : undefined;
   const repeatCount = frequency === "customMonths" ? toPositiveIntOrNull(body.repeatCount) ?? undefined : undefined;
 
+  const isRequestor = !auth.isSuperadmin;
+
   const expense: Expense = {
     id: randomUUID(),
     title,
@@ -121,7 +123,14 @@ export async function POST(req: Request) {
     ...(repeatCount ? { repeatCount } : {}),
     departmentId,
     notes,
-    paymentStatus,
+    paymentStatus: isRequestor ? "unpaid" : paymentStatus,
+    ...(isRequestor
+      ? {
+          isRequest: true,
+          requestStatus: "pending" as const,
+          requestedBy: auth.displayName || auth.email,
+        }
+      : {}),
     createdAt: new Date().toISOString(),
   };
 
@@ -130,5 +139,56 @@ export async function POST(req: Request) {
   saveExpenses(expenses);
 
   return NextResponse.json({ expense });
+}
+
+export async function PUT(req: Request) {
+  const auth = await requireApiPermission(req, "expenses");
+  if (auth instanceof NextResponse) return auth;
+  if (!auth.isSuperadmin) return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+
+  const body = (await req.json()) as Partial<Expense> & { id?: unknown };
+  const id = typeof body.id === "string" ? body.id.trim() : "";
+  if (!id) return NextResponse.json({ error: "Missing `id`." }, { status: 400 });
+
+  const expenses = loadExpenses();
+  const idx = expenses.findIndex((e) => e.id === id);
+  if (idx < 0) return NextResponse.json({ error: "Expense not found." }, { status: 404 });
+
+  const prev = expenses[idx];
+  const next: Expense = {
+    ...prev,
+    ...(typeof body.title === "string" && body.title.trim() ? { title: body.title.trim() } : {}),
+    ...(typeof body.category === "string" && body.category.trim() ? { category: body.category.trim() } : {}),
+    ...(typeof body.amount === "number" && Number.isFinite(body.amount) ? { amount: body.amount } : {}),
+    ...(typeof body.frequency === "string" && isFrequency(body.frequency) ? { frequency: body.frequency } : {}),
+    ...(typeof body.startDate === "string" && isDateOnly(body.startDate) ? { startDate: body.startDate } : {}),
+    ...(typeof body.repeatEveryMonths === "number" && Number.isFinite(body.repeatEveryMonths)
+      ? { repeatEveryMonths: body.repeatEveryMonths }
+      : {}),
+    ...(typeof body.repeatCount === "number" && Number.isFinite(body.repeatCount) ? { repeatCount: body.repeatCount } : {}),
+    ...(typeof body.departmentId === "string" ? { departmentId: body.departmentId || undefined } : {}),
+    ...(typeof body.notes === "string" ? { notes: body.notes.trim() ? body.notes.trim() : undefined } : {}),
+    ...(body.paymentStatus && isPaymentStatus(body.paymentStatus) ? { paymentStatus: body.paymentStatus } : {}),
+  };
+
+  expenses[idx] = next;
+  saveExpenses(expenses);
+  return NextResponse.json({ ok: true, expense: next });
+}
+
+export async function DELETE(req: Request) {
+  const auth = await requireApiPermission(req, "expenses");
+  if (auth instanceof NextResponse) return auth;
+  if (!auth.isSuperadmin) return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+
+  const url = new URL(req.url);
+  const id = (url.searchParams.get("id") ?? "").trim();
+  if (!id) return NextResponse.json({ error: "Missing `id`." }, { status: 400 });
+
+  const expenses = loadExpenses();
+  const next = expenses.filter((e) => e.id !== id);
+  if (next.length === expenses.length) return NextResponse.json({ error: "Expense not found." }, { status: 404 });
+  saveExpenses(next);
+  return NextResponse.json({ ok: true });
 }
 
