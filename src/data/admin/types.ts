@@ -309,6 +309,26 @@ export interface JntImportIndexEntry {
   rowCount: number;
 }
 
+export type BookingStatus =
+  | "pending"
+  | "in_transit"
+  | "out_for_delivery"
+  | "return_to_sender"
+  | "lost_package"
+  | "completed";
+
+export type BookingStatusRecord = {
+  waybillNumber: string;
+  /** YYYY-MM-DD from J&T import row */
+  shipDateYmd: string;
+  receiver: string;
+  /** When present in J&T export (may map to invoice number) */
+  orderNumber?: string;
+  status: BookingStatus;
+  updatedAt: string; // ISO
+  updatedBy?: string;
+};
+
 export interface WalletPayoutReceipt {
   paid: boolean;
   receiptNumber: string;
