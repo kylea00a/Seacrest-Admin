@@ -723,6 +723,7 @@ export default function OrdersPage() {
   };
 
   const bulkSelectedInvoices = useMemo(() => Object.keys(bulkSelected).filter((k) => bulkSelected[k]), [bulkSelected]);
+  const bulkSelectedList = useMemo(() => bulkSelectedInvoices.slice().sort((a, b) => a.localeCompare(b)), [bulkSelectedInvoices]);
 
   const toggleBulkMode = () => {
     if (!bulkMode) {
@@ -1281,7 +1282,7 @@ export default function OrdersPage() {
           <thead className="bg-black/30 text-zinc-300">
             <tr className="text-[11px]">
               {bulkMode ? (
-                <th className="px-2 py-2 text-center" rowSpan={headRowSpan}>
+                <th className="orders-pin-0 px-2 py-2 text-center" rowSpan={headRowSpan}>
                   <input
                     type="checkbox"
                     checked={visibleRows.length > 0 && visibleRows.every((r) => bulkSelected[r.invoiceNumber])}
@@ -1583,7 +1584,7 @@ export default function OrdersPage() {
                 <Fragment key={`${r.invoiceNumber}-${r.date}-${r.rowIndex}`}>
                   <tr className="bg-black/10 text-zinc-100">
                     {bulkMode ? (
-                      <td className="px-2 py-2 text-center">
+                      <td className="orders-pin-0 px-2 py-2 text-center">
                         <input
                           type="checkbox"
                           checked={Boolean(bulkSelected[inv])}
@@ -1876,6 +1877,35 @@ export default function OrdersPage() {
           </tbody>
         </table>
       </div>
+
+      {bulkMode && bulkSelectedList.length > 0 ? (
+        <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-white">Selected orders</div>
+              <div className="mt-1 text-xs text-zinc-400">
+                These stay selected even when you change date range / page.
+              </div>
+            </div>
+            <button type="button" onClick={() => setBulkSelected({})} className="admin-btn-secondary px-3 py-2 text-xs">
+              Clear
+            </button>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {bulkSelectedList.map((inv) => (
+              <button
+                key={`sel-${inv}`}
+                type="button"
+                onClick={() => setBulkSelected((p) => ({ ...p, [inv]: false }))}
+                className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-white/10"
+                title="Click to remove from selection"
+              >
+                {inv} <span className="text-zinc-500">×</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <div className="text-xs text-zinc-400">

@@ -55,6 +55,12 @@ body {
     border-collapse: separate;
     border-spacing: 0;
   }
+  .orders-pinned-table thead .orders-pin-0 {
+    @apply bg-zinc-900/95 backdrop-blur-sm;
+  }
+  .orders-pinned-table tbody .orders-pin-0 {
+    @apply bg-zinc-950/95 backdrop-blur-sm;
+  }
   .orders-pinned-table thead .orders-pin-1,
   .orders-pinned-table thead .orders-pin-2,
   .orders-pinned-table thead .orders-pin-3 {
@@ -65,9 +71,18 @@ body {
   .orders-pinned-table tbody .orders-pin-3 {
     @apply bg-zinc-950/95 backdrop-blur-sm;
   }
-  .orders-pinned-table .orders-pin-1 {
+  .orders-pinned-table .orders-pin-0 {
     position: sticky;
     left: 0;
+    z-index: 28;
+    width: 2.5rem;
+    min-width: 2.5rem;
+    max-width: 2.5rem;
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .orders-pinned-table .orders-pin-1 {
+    position: sticky;
+    left: 2.5rem;
     z-index: 25;
     width: 6rem;
     min-width: 6rem;
@@ -76,7 +91,7 @@ body {
   }
   .orders-pinned-table .orders-pin-2 {
     position: sticky;
-    left: 6rem;
+    left: 8.5rem;
     z-index: 26;
     width: 7rem;
     min-width: 7rem;
@@ -85,7 +100,7 @@ body {
   }
   .orders-pinned-table .orders-pin-3 {
     position: sticky;
-    left: 13rem;
+    left: 15.5rem;
     z-index: 27;
     width: 13rem;
     min-width: 13rem;
