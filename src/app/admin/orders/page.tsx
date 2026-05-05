@@ -542,6 +542,7 @@ export default function OrdersPage() {
     contactNumber: "",
     shippingFullAddress: "",
     deliveryFee: "",
+    deliveryFeeOthers: "",
   });
   const [addBasic, setAddBasic] = useState({
     date: "",
@@ -772,6 +773,7 @@ export default function OrdersPage() {
           contactNumber: bulkDraft.contactNumber,
           shippingFullAddress: bulkDraft.shippingFullAddress,
           deliveryFee: bulkDraft.deliveryFee,
+          deliveryFeeOthers: bulkDraft.deliveryFeeOthers,
         }),
       });
       const json = (await res.json()) as { ok?: boolean; error?: string; notFound?: string[] };
@@ -1266,6 +1268,16 @@ export default function OrdersPage() {
               <input
                 value={bulkDraft.deliveryFee}
                 onChange={(e) => setBulkDraft((p) => ({ ...p, deliveryFee: e.target.value }))}
+                className="admin-input mt-1 w-full text-right tabular-nums"
+                inputMode="decimal"
+                placeholder="(no change)"
+              />
+            </label>
+            <label className="block text-xs text-zinc-400">
+              Delivery fee (Others)
+              <input
+                value={bulkDraft.deliveryFeeOthers}
+                onChange={(e) => setBulkDraft((p) => ({ ...p, deliveryFeeOthers: e.target.value }))}
                 className="admin-input mt-1 w-full text-right tabular-nums"
                 inputMode="decimal"
                 placeholder="(no change)"

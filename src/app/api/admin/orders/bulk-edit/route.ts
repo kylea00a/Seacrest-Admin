@@ -53,6 +53,7 @@ export async function POST(req: Request) {
     contactNumber?: unknown;
     shippingFullAddress?: unknown;
     deliveryFee?: unknown;
+    deliveryFeeOthers?: unknown;
   };
 
   const invoiceNumbers = Array.isArray(body.invoiceNumbers)
@@ -73,6 +74,7 @@ export async function POST(req: Request) {
   const contactNumber = typeof body.contactNumber === "string" ? body.contactNumber : undefined;
   const shippingFullAddress = typeof body.shippingFullAddress === "string" ? body.shippingFullAddress : undefined;
   const deliveryFee = parseNumber(body.deliveryFee);
+  const deliveryFeeOthers = parseNumber(body.deliveryFeeOthers);
 
   const hasAny =
     deliveryCategory !== undefined ||
@@ -81,6 +83,7 @@ export async function POST(req: Request) {
     contactNumber !== undefined ||
     shippingFullAddress !== undefined ||
     deliveryFee !== undefined ||
+    deliveryFeeOthers !== undefined ||
     Boolean(claimDate);
   if (!hasAny) return NextResponse.json({ error: "Nothing to change." }, { status: 400 });
 
@@ -106,6 +109,7 @@ export async function POST(req: Request) {
     if (contactNumber !== undefined) nextLine.contactNumber = contactNumber;
     if (shippingFullAddress !== undefined) nextLine.shippingFullAddress = shippingFullAddress;
     if (deliveryFee !== undefined) nextLine.deliveryFee = Math.max(0, deliveryFee);
+    if (deliveryFeeOthers !== undefined) nextLine.deliveryFeeOthers = Math.max(0, deliveryFeeOthers);
 
     const nextAdj: OrderAdjustment = {
       invoiceNumber: inv,
