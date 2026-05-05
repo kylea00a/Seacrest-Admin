@@ -43,7 +43,7 @@ function priceFromPackageCode(packageName: string): number {
 }
 
 export async function GET(req: Request) {
-  const auth = await requireApiAnyPermission(req, ["orders", "ordersFullEdit"]);
+  const auth = await requireApiAnyPermission(req, ["orders", "ordersFullEdit", "salesReport"]);
   if (auth instanceof NextResponse) return auth;
   const url = new URL(req.url);
   const startRaw = url.searchParams.get("start");
