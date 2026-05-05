@@ -53,7 +53,7 @@ const ALL_SECTIONS: DockSection[] = [
     label: "Sales",
     links: [
       { key: "sales-report", label: "Sales Report", href: "/admin/sales-report", perm: "salesReport" },
-      { key: "product-calculator", label: "Product Calculator", href: "/admin/product-calculator", perm: "inventory" },
+      { key: "product-calculator", label: "Product Calculator", href: "/admin/product-calculator", perm: "productCalculator" },
       { key: "import", label: "Import Orders", href: "/admin/import", perm: "import" },
       { key: "orders", label: "All Orders", href: "/admin/orders", perm: "orders" },
       { key: "inventory", label: "Inventory", href: "/admin/inventory", perm: "inventory" },

@@ -35,7 +35,7 @@ function normalizeFees(v: unknown): ShippingFeeBracket[] {
 }
 
 export async function GET(req: Request) {
-  const auth = await requireApiAnyPermission(req, ["settings", "packagesProducts"]);
+  const auth = await requireApiAnyPermission(req, ["settings", "packagesProducts", "productCalculator"]);
   if (auth instanceof NextResponse) return auth;
   const couriers = loadShippingCouriers();
   return NextResponse.json({ couriers });
