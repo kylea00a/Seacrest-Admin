@@ -523,6 +523,18 @@ export default function OrdersPage() {
   const [savingStatus, setSavingStatus] = useState<string>("");
   const [addOpen, setAddOpen] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkSelected, setBulkSelected] = useState<Record<string, boolean>>({});
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkApplying, setBulkApplying] = useState(false);
+  const [bulkDraft, setBulkDraft] = useState({
+    courier: "",
+    claimDate: "",
+    shippingFullName: "",
+    contactNumber: "",
+    shippingFullAddress: "",
+    deliveryFee: "",
+  });
   const [addBasic, setAddBasic] = useState({
     date: "",
     distributorId: "",
@@ -710,6 +722,61 @@ export default function OrdersPage() {
     }
   };
 
+  const bulkSelectedInvoices = useMemo(() => Object.keys(bulkSelected).filter((k) => bulkSelected[k]), [bulkSelected]);
+
+  const toggleBulkMode = () => {
+    if (!bulkMode) {
+      setBulkMode(true);
+      setBulkOpen(false);
+      setBulkSelected({});
+      return;
+    }
+    // Already in bulk mode:
+    // - if editor closed, open it
+    // - if editor open, close + exit mode (keeping UX simple)
+    if (!bulkOpen) {
+      setBulkOpen(true);
+    } else {
+      setBulkOpen(false);
+      setBulkMode(false);
+      setBulkSelected({});
+    }
+  };
+
+  const applyBulkChange = async () => {
+    const invoiceNumbers = bulkSelectedInvoices;
+    if (!invoiceNumbers.length) return;
+    setBulkApplying(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/orders/bulk-edit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invoiceNumbers,
+          courier: bulkDraft.courier,
+          claimDate: bulkDraft.claimDate,
+          shippingFullName: bulkDraft.shippingFullName,
+          contactNumber: bulkDraft.contactNumber,
+          shippingFullAddress: bulkDraft.shippingFullAddress,
+          deliveryFee: bulkDraft.deliveryFee,
+        }),
+      });
+      const json = (await res.json()) as { ok?: boolean; error?: string; notFound?: string[] };
+      if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
+      setBulkOpen(false);
+      setBulkMode(false);
+      setBulkSelected({});
+      // Reload current view.
+      if (search.trim()) void refetchSearchRows();
+      else void refetchCompiledRows();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBulkApplying(false);
+    }
+  };
+
   const tbodyColumnCount = useMemo(() => {
     const pkgCols = pkgProductsOpen ? productKeys.length : 1;
     const subCols = subProductsOpen ? productKeys.length : 0;
@@ -873,6 +940,19 @@ export default function OrdersPage() {
               title="Manually add an order to a specific date"
             >
               + Add order
+            </button>
+          ) : null}
+          {canFullOrderEdit ? (
+            <button
+              type="button"
+              onClick={toggleBulkMode}
+              className={[
+                "rounded-xl px-3 py-2 text-xs font-semibold",
+                bulkMode ? "border border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15" : "border border-white/10 bg-white/5 text-zinc-200 hover:bg-white/10",
+              ].join(" ")}
+              title={bulkMode ? "Click to open bulk editor; click again to exit" : "Select multiple orders and apply changes"}
+            >
+              Bulk change
             </button>
           ) : null}
           <div>
@@ -1092,15 +1172,132 @@ export default function OrdersPage() {
         </div>
       ) : null}
 
+      {bulkMode && bulkOpen ? (
+        <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-white">Bulk change</div>
+              <div className="mt-1 text-xs text-zinc-400">
+                Selected: <span className="font-semibold text-zinc-200">{bulkSelectedInvoices.length}</span>. Only the fields below will be changed. All selected orders will be claimed.
+              </div>
+            </div>
+            <button type="button" onClick={() => setBulkOpen(false)} className="admin-btn-secondary px-3 py-2 text-xs">
+              Close
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="block text-xs text-zinc-400">
+              Courier
+              <select
+                value={bulkDraft.courier}
+                onChange={(e) => setBulkDraft((p) => ({ ...p, courier: e.target.value }))}
+                className="admin-select mt-1 w-full"
+              >
+                <option value="">(no change)</option>
+                <option value="J&T">J&amp;T</option>
+                <option value="International">International</option>
+              </select>
+            </label>
+            <label className="block text-xs text-zinc-400">
+              Claim Date (Asia/Manila)
+              <input
+                type="date"
+                value={bulkDraft.claimDate}
+                onChange={(e) => setBulkDraft((p) => ({ ...p, claimDate: e.target.value }))}
+                className="admin-input mt-1 w-full"
+                placeholder="YYYY-MM-DD"
+              />
+            </label>
+            <label className="block text-xs text-zinc-400">
+              Shipping full name
+              <input
+                value={bulkDraft.shippingFullName}
+                onChange={(e) => setBulkDraft((p) => ({ ...p, shippingFullName: e.target.value }))}
+                className="admin-input mt-1 w-full"
+                placeholder="(no change if blank)"
+              />
+            </label>
+            <label className="block text-xs text-zinc-400">
+              Contact #
+              <input
+                value={bulkDraft.contactNumber}
+                onChange={(e) => setBulkDraft((p) => ({ ...p, contactNumber: e.target.value }))}
+                className="admin-input mt-1 w-full"
+                placeholder="(no change if blank)"
+              />
+            </label>
+            <label className="block text-xs text-zinc-400 sm:col-span-2 lg:col-span-3">
+              Shipping full address
+              <input
+                value={bulkDraft.shippingFullAddress}
+                onChange={(e) => setBulkDraft((p) => ({ ...p, shippingFullAddress: e.target.value }))}
+                className="admin-input mt-1 w-full"
+                placeholder="(no change if blank)"
+              />
+            </label>
+            <label className="block text-xs text-zinc-400">
+              Delivery fee
+              <input
+                value={bulkDraft.deliveryFee}
+                onChange={(e) => setBulkDraft((p) => ({ ...p, deliveryFee: e.target.value }))}
+                className="admin-input mt-1 w-full text-right tabular-nums"
+                inputMode="decimal"
+                placeholder="(no change)"
+              />
+            </label>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void applyBulkChange()}
+              disabled={bulkApplying || bulkSelectedInvoices.length === 0}
+              className="admin-btn-primary"
+              title={bulkSelectedInvoices.length === 0 ? "Select at least one order first" : "Apply bulk changes"}
+            >
+              {bulkApplying ? "Applying…" : "Apply to selected"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setBulkSelected({})}
+              disabled={bulkApplying}
+              className="admin-btn-secondary"
+            >
+              Clear selection
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="admin-table-wrap">
         <table className="orders-pinned-table min-w-full text-xs">
           <colgroup>
+            {bulkMode ? <col className="w-[2.5rem]" /> : null}
             <col className="w-[6rem]" />
             <col className="w-[7rem]" />
             <col className="w-[13rem]" />
           </colgroup>
           <thead className="bg-black/30 text-zinc-300">
             <tr className="text-[11px]">
+              {bulkMode ? (
+                <th className="px-2 py-2 text-center" rowSpan={headRowSpan}>
+                  <input
+                    type="checkbox"
+                    checked={visibleRows.length > 0 && visibleRows.every((r) => bulkSelected[r.invoiceNumber])}
+                    onChange={(e) => {
+                      const on = e.target.checked;
+                      setBulkSelected((prev) => {
+                        const next = { ...prev };
+                        for (const r of visibleRows) next[r.invoiceNumber] = on;
+                        return next;
+                      });
+                    }}
+                    className="rounded border-white/20"
+                    title="Select all visible"
+                  />
+                </th>
+              ) : null}
               <th
                 className="orders-pin-1 px-3 py-2 text-left"
                 rowSpan={headRowSpan}
@@ -1385,6 +1582,16 @@ export default function OrdersPage() {
               return (
                 <Fragment key={`${r.invoiceNumber}-${r.date}-${r.rowIndex}`}>
                   <tr className="bg-black/10 text-zinc-100">
+                    {bulkMode ? (
+                      <td className="px-2 py-2 text-center">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(bulkSelected[inv])}
+                          onChange={(e) => setBulkSelected((p) => ({ ...p, [inv]: e.target.checked }))}
+                          className="rounded border-white/20"
+                        />
+                      </td>
+                    ) : null}
                     <td
                       className="orders-pin-1 px-3 py-2 whitespace-nowrap"
                       title="Imported/effective date (does not change when claimed)."
