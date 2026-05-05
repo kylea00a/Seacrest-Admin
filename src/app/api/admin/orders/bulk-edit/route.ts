@@ -46,6 +46,7 @@ export async function POST(req: Request) {
 
   const body = (await req.json()) as {
     invoiceNumbers?: unknown;
+    deliveryCategory?: unknown;
     claimDate?: unknown;
     courier?: unknown;
     shippingFullName?: unknown;
@@ -65,6 +66,8 @@ export async function POST(req: Request) {
   const now = new Date();
   const claimDate = isDateOnly(body.claimDate) ? body.claimDate.trim() : calendarYmdInTimeZone(now, "Asia/Manila");
 
+  const deliveryCategory =
+    body.deliveryCategory === "pickup" || body.deliveryCategory === "delivery" ? (body.deliveryCategory as "pickup" | "delivery") : undefined;
   const courier = typeof body.courier === "string" ? body.courier.trim() : undefined;
   const shippingFullName = typeof body.shippingFullName === "string" ? body.shippingFullName : undefined;
   const contactNumber = typeof body.contactNumber === "string" ? body.contactNumber : undefined;
@@ -72,6 +75,7 @@ export async function POST(req: Request) {
   const deliveryFee = parseNumber(body.deliveryFee);
 
   const hasAny =
+    deliveryCategory !== undefined ||
     courier !== undefined ||
     shippingFullName !== undefined ||
     contactNumber !== undefined ||
@@ -96,6 +100,7 @@ export async function POST(req: Request) {
     const baseRow = mergeOrderRowWithAdjustment(found.rec, existing);
 
     const nextLine: OrderLineDetailOverride = { ...(existing?.lineDetails ?? {}) };
+    if (deliveryCategory !== undefined) nextLine.deliveryCategory = deliveryCategory;
     if (courier !== undefined) nextLine.deliveryCourier = courier;
     if (shippingFullName !== undefined) nextLine.shippingFullName = shippingFullName;
     if (contactNumber !== undefined) nextLine.contactNumber = contactNumber;

@@ -528,6 +528,7 @@ export default function OrdersPage() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkApplying, setBulkApplying] = useState(false);
   const [bulkDraft, setBulkDraft] = useState({
+    deliveryCategory: "",
     courier: "",
     claimDate: "",
     shippingFullName: "",
@@ -755,6 +756,7 @@ export default function OrdersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           invoiceNumbers,
+          deliveryCategory: bulkDraft.deliveryCategory,
           courier: bulkDraft.courier,
           claimDate: bulkDraft.claimDate,
           shippingFullName: bulkDraft.shippingFullName,
@@ -1188,6 +1190,18 @@ export default function OrdersPage() {
           </div>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="block text-xs text-zinc-400">
+              Pick up / Delivery
+              <select
+                value={bulkDraft.deliveryCategory}
+                onChange={(e) => setBulkDraft((p) => ({ ...p, deliveryCategory: e.target.value }))}
+                className="admin-select mt-1 w-full"
+              >
+                <option value="">(no change)</option>
+                <option value="pickup">Pick up</option>
+                <option value="delivery">Delivery</option>
+              </select>
+            </label>
             <label className="block text-xs text-zinc-400">
               Courier
               <select
