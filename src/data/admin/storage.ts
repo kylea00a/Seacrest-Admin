@@ -18,6 +18,7 @@ import type {
   Reminder,
   ShippingCourier,
   BookingStatusRecord,
+  DeliveryFeeCharge,
 } from "./types";
 
 const PROJECT_ROOT = process.cwd();
@@ -39,6 +40,7 @@ const CASH_LEDGER_FILE = path.join(ADMIN_DATA_DIR, "cashLedger.json");
 const REMINDERS_FILE = path.join(ADMIN_DATA_DIR, "reminders.json");
 const SHIPPING_COURIERS_FILE = path.join(ADMIN_DATA_DIR, "shippingCouriers.json");
 const BOOKING_STATUS_FILE = path.join(ADMIN_DATA_DIR, "bookingStatus.json");
+const DELIVERY_FEE_CHARGES_FILE = path.join(ADMIN_DATA_DIR, "deliveryFeeCharges.json");
 
 function ensureAdminDir() {
   if (!fs.existsSync(ADMIN_DATA_DIR)) fs.mkdirSync(ADMIN_DATA_DIR, { recursive: true });
@@ -98,6 +100,14 @@ export function loadBookingStatus(): Record<string, BookingStatusRecord> {
 
 export function saveBookingStatus(map: Record<string, BookingStatusRecord>) {
   writeJsonFile(BOOKING_STATUS_FILE, map);
+}
+
+export function loadDeliveryFeeCharges(): DeliveryFeeCharge[] {
+  return readJsonFile<DeliveryFeeCharge[]>(DELIVERY_FEE_CHARGES_FILE, []);
+}
+
+export function saveDeliveryFeeCharges(charges: DeliveryFeeCharge[]) {
+  writeJsonFile(DELIVERY_FEE_CHARGES_FILE, charges);
 }
 
 export function loadPettyCashState(): PettyCashState {

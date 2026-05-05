@@ -329,6 +329,22 @@ export type BookingStatusRecord = {
   updatedBy?: string;
 };
 
+export type DeliveryFeeCharge = {
+  id: string;
+  /** YYYY-MM-DD sales day for this fee (the delivery attempt day) */
+  date: string;
+  invoiceNumber: string;
+  /** Optional attempt id for future redelivery flows */
+  attemptId?: string;
+  amount: number;
+  note?: string;
+  createdAt: string; // ISO
+  createdBy?: string;
+  /** When set, this charge is reversed and excluded from reports */
+  voidedAt?: string; // ISO
+  voidedBy?: string;
+};
+
 export interface WalletPayoutReceipt {
   paid: boolean;
   receiptNumber: string;
