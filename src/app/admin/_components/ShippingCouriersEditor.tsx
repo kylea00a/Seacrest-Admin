@@ -29,10 +29,12 @@ function toFees(d: DraftCourier["fees"]): ShippingFeeBracket[] {
   const out: ShippingFeeBracket[] = [];
   for (const r of d) {
     const minWeight = Number(String(r.minWeight ?? "").trim());
-    const maxWeight = Number(String(r.maxWeight ?? "").trim());
+    const maxText = String(r.maxWeight ?? "").trim();
+    const maxWeight = maxText === "" ? NaN : Number(maxText);
     const price = Number(String(r.price ?? "").trim());
-    if (!Number.isFinite(minWeight) || !Number.isFinite(maxWeight) || !Number.isFinite(price)) continue;
-    out.push({ minWeight, maxWeight, price });
+    if (!Number.isFinite(minWeight) || !Number.isFinite(price)) continue;
+    if (Number.isFinite(maxWeight)) out.push({ minWeight, maxWeight, price });
+    else out.push({ minWeight, price });
   }
   return out;
 }

@@ -22,13 +22,40 @@ function computeShippingFeeKg(totalWeight: number, courier: ShippingCourier | nu
   const w = Number(totalWeight);
   if (!Number.isFinite(w) || w <= 0) return 0;
   const fees = courier.fees ?? [];
-  const match = fees.find((b) => w >= b.minWeight && w <= b.maxWeight);
-  if (match) return match.price;
-  // Fallback: if overweight (past max), use the last bracket’s price; if underweight, use first.
   if (!fees.length) return null;
-  const sorted = fees.slice().sort((a, b) => a.minWeight - b.minWeight || a.maxWeight - b.maxWeight);
-  if (w < sorted[0]!.minWeight) return sorted[0]!.price;
-  return sorted[sorted.length - 1]!.price;
+
+  const fixed = fees.filter((b) => Number.isFinite(b.maxWeight as number)) as Array<{ minWeight: number; maxWeight: number; price: number }>;
+  const open = fees.filter((b) => b.maxWeight == null) as Array<{ minWeight: number; price: number }>;
+
+  // 1) Normal fixed bracket match.
+  const fixedMatch = fixed.find((b) => w >= b.minWeight && w <= b.maxWeight);
+  if (fixedMatch) return fixedMatch.price;
+
+  // 2) Open-ended bracket = per-kilo additional above the last fixed bracket.
+  // Example:
+  // - fixed last: 4.01–5.00 => 400
+  // - open: 5.01–(blank) => 100
+  // Weight 5.76 => 400 + ceil(5.76 - 5.00) * 100 = 500
+  // Weight 6.40 => 400 + ceil(6.40 - 5.00) * 100 = 600
+  if (open.length) {
+    const openRule = open.slice().sort((a, b) => a.minWeight - b.minWeight)[0]!;
+    const base = fixed.slice().sort((a, b) => a.maxWeight - b.maxWeight)[fixed.length - 1];
+    const baseMax = base?.maxWeight ?? (openRule.minWeight > 0 ? openRule.minWeight : 0);
+    const basePrice = base?.price ?? 0;
+
+    if (w >= openRule.minWeight) {
+      const extraKg = Math.max(0, Math.ceil(w - baseMax));
+      return basePrice + extraKg * openRule.price;
+    }
+  }
+
+  // 3) Under min: use first fixed price if present.
+  const sortedFixed = fixed.slice().sort((a, b) => a.minWeight - b.minWeight || a.maxWeight - b.maxWeight);
+  if (sortedFixed.length && w < sortedFixed[0]!.minWeight) return sortedFixed[0]!.price;
+
+  // 4) Over max without open rule: use last fixed price.
+  if (sortedFixed.length) return sortedFixed[sortedFixed.length - 1]!.price;
+  return null;
 }
 
 export default function ProductCalculatorPage() {

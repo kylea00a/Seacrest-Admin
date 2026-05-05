@@ -169,7 +169,8 @@ export interface AdminSettings {
 
 export type ShippingFeeBracket = {
   minWeight: number; // kg
-  maxWeight: number; // kg
+  /** If omitted, treated as "and above" (per-kilo additional). */
+  maxWeight?: number; // kg
   price: number; // PHP
 };
 

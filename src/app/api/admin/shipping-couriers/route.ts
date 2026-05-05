@@ -23,14 +23,21 @@ function normalizeFees(v: unknown): ShippingFeeBracket[] {
     if (!item || typeof item !== "object") continue;
     const o = item as Record<string, unknown>;
     const minWeight = num(o.minWeight);
-    const maxWeight = num(o.maxWeight);
+    const maxWeightRaw = o.maxWeight;
+    const maxWeight = maxWeightRaw == null || (typeof maxWeightRaw === "string" && maxWeightRaw.trim() === "") ? NaN : num(maxWeightRaw);
     const price = num(o.price);
-    if (!Number.isFinite(minWeight) || !Number.isFinite(maxWeight) || !Number.isFinite(price)) continue;
-    if (minWeight < 0 || maxWeight <= 0 || price < 0) continue;
-    if (maxWeight < minWeight) continue;
-    out.push({ minWeight, maxWeight, price });
+    if (!Number.isFinite(minWeight) || !Number.isFinite(price)) continue;
+    if (minWeight < 0 || price < 0) continue;
+    if (Number.isFinite(maxWeight)) {
+      if (maxWeight <= 0) continue;
+      if (maxWeight < minWeight) continue;
+      out.push({ minWeight, maxWeight, price });
+    } else {
+      // Open-ended bracket: per-kilo additional beyond previous fixed bracket.
+      out.push({ minWeight, price });
+    }
   }
-  out.sort((a, b) => a.minWeight - b.minWeight || a.maxWeight - b.maxWeight);
+  out.sort((a, b) => a.minWeight - b.minWeight || Number(a.maxWeight ?? Number.POSITIVE_INFINITY) - Number(b.maxWeight ?? Number.POSITIVE_INFINITY));
   return out;
 }
 
