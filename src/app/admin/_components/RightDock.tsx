@@ -64,6 +64,7 @@ const ALL_SECTIONS: DockSection[] = [
     key: "settings",
     label: "Settings",
     links: [
+      { key: "product-calculator", label: "Product Calculator", href: "/admin/product-calculator", perm: "settings" },
       { key: "settings-main", label: "Categories", href: "/admin/settings", perm: "settings" },
       {
         key: "pkgprod",

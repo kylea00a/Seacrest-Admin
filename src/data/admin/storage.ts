@@ -16,6 +16,7 @@ import type {
   PettyCashState,
   PettyCashLedgerTransaction,
   Reminder,
+  ShippingCourier,
 } from "./types";
 
 const PROJECT_ROOT = process.cwd();
@@ -35,6 +36,7 @@ const INVENTORY_SUPPLY_FILE = path.join(ADMIN_DATA_DIR, "inventorySupply.json");
 const INVENTORY_ENDING_FILE = path.join(ADMIN_DATA_DIR, "inventoryEnding.json");
 const CASH_LEDGER_FILE = path.join(ADMIN_DATA_DIR, "cashLedger.json");
 const REMINDERS_FILE = path.join(ADMIN_DATA_DIR, "reminders.json");
+const SHIPPING_COURIERS_FILE = path.join(ADMIN_DATA_DIR, "shippingCouriers.json");
 
 function ensureAdminDir() {
   if (!fs.existsSync(ADMIN_DATA_DIR)) fs.mkdirSync(ADMIN_DATA_DIR, { recursive: true });
@@ -78,6 +80,14 @@ export function loadReminders(): Reminder[] {
 
 export function saveReminders(reminders: Reminder[]) {
   writeJsonFile(REMINDERS_FILE, reminders);
+}
+
+export function loadShippingCouriers(): ShippingCourier[] {
+  return readJsonFile<ShippingCourier[]>(SHIPPING_COURIERS_FILE, []);
+}
+
+export function saveShippingCouriers(couriers: ShippingCourier[]) {
+  writeJsonFile(SHIPPING_COURIERS_FILE, couriers);
 }
 
 export function loadPettyCashState(): PettyCashState {

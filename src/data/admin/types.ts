@@ -167,6 +167,22 @@ export interface AdminSettings {
   updatedAt: string; // ISO
 }
 
+export type ShippingFeeBracket = {
+  minWeight: number; // kg
+  maxWeight: number; // kg
+  price: number; // PHP
+};
+
+export type ShippingCourier = {
+  id: string;
+  name: string; // e.g. J&T
+  country?: string;
+  description?: string; // e.g. 5-7 days
+  fees: ShippingFeeBracket[];
+  updatedAt: string; // ISO
+  createdAt: string; // ISO
+};
+
 export interface OrdersImportSummary {
   date: string; // YYYY-MM-DD (what you upload for)
   filename: string;

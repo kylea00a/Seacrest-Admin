@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { roundWeight2 } from "@/data/admin/productSettings";
 import type { AdminPackageItem, AdminProductItem, AdminSettings } from "@/data/admin/types";
+import ShippingCouriersEditor from "./ShippingCouriersEditor";
 
 function moneyStr(n: number): string {
   if (!Number.isFinite(n)) return "";
@@ -536,6 +537,8 @@ export default function PackagesProductsEditor({ standalone = true }: PackagesPr
             </button>
           </div>
         </div>
+
+        {standalone ? <ShippingCouriersEditor /> : null}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
