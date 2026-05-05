@@ -153,6 +153,7 @@ export default function SalesReportPage() {
   const daily = useMemo(() => {
     const out = new Map<string, DailyRow>();
     const products = (settings?.products ?? []).map((p) => p.name);
+    const range = monthToRange(month);
 
     const add = (d: string): DailyRow => {
       const existing = out.get(d);
@@ -183,6 +184,7 @@ export default function SalesReportPage() {
       if (isOrderExcludedFromSuccessMetrics(status)) continue;
       const day = String(row["date"] ?? "").slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+      if (range && (day < range.start || day > range.end)) continue;
       const dr = add(day);
 
       const memberType = String(row["memberType"] ?? "").toLowerCase();
@@ -251,12 +253,14 @@ export default function SalesReportPage() {
       if (amt <= 0) continue;
       const claimDay = getClaimCalendarYmd(inv, claims as any);
       if (!claimDay || !/^\d{4}-\d{2}-\d{2}$/.test(claimDay)) continue;
+      // Keep month table clean: only show claim-day fees if claim day is inside selected month.
+      if (range && (claimDay < range.start || claimDay > range.end)) continue;
       add(claimDay).deliveryFeeOthers += amt;
     }
 
     // Oldest → latest (top-down)
     return Array.from(out.values()).sort((a, b) => a.date.localeCompare(b.date));
-  }, [rows, settings, productPriceByName, affiliatePriceByPackagePrice, deliveryFeeCharges, claims]);
+  }, [rows, settings, productPriceByName, affiliatePriceByPackagePrice, deliveryFeeCharges, claims, month]);
 
   const monthTotals = useMemo(() => {
     let pkg = 0;
