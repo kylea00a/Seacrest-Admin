@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { AdminSettings } from "@/data/admin/types";
 import { isOrderExcludedFromSuccessMetrics, type ProductBreakdown } from "@/data/admin/ordersParse";
 import type { BankAccount, CashTransaction } from "@/data/admin/types";
+import { getClaimCalendarYmd } from "@/data/admin/orderClaim";
 
 function countFmt(n: number) {
   return new Intl.NumberFormat().format(n);
@@ -35,6 +36,7 @@ export default function SalesReportPage() {
   const [settings, setSettings] = useState<AdminSettings | null>(null);
   const [month, setMonth] = useState<string>("");
   const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
+  const [claims, setClaims] = useState<Record<string, any>>({});
   const [deliveryFeeCharges, setDeliveryFeeCharges] = useState<Array<Record<string, unknown>>>([]);
   const [cashAccounts, setCashAccounts] = useState<BankAccount[]>([]);
   const [cashTx, setCashTx] = useState<CashTransaction[]>([]);
@@ -81,12 +83,14 @@ export default function SalesReportPage() {
           fetch(`/api/admin/orders/compiled?start=${range.start}&end=${range.end}`, { cache: "no-store" }),
           fetch(`/api/admin/delivery-fee-charges?start=${range.start}&end=${range.end}`, { cache: "no-store" }),
         ]);
-        const json = (await res.json()) as { rows?: Array<Record<string, unknown>>; error?: string };
+        const json = (await res.json()) as { rows?: Array<Record<string, unknown>>; claims?: Record<string, unknown>; error?: string };
         const dfJson = (await dfRes.json()) as { charges?: Array<Record<string, unknown>>; error?: string };
         if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
         if (!dfRes.ok) throw new Error(dfJson.error ?? `Failed with status ${dfRes.status}`);
         if (cancelled) return;
         setRows(json.rows ?? []);
+        setClaims((json.claims ?? {}) as Record<string, any>);
+        // Keep legacy/optional ledger (still shown in drilldown), but "Delivery fee (Others)" is now computed from orders' deliveryFeeOthers by claim date.
         setDeliveryFeeCharges(dfJson.charges ?? []);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -236,17 +240,23 @@ export default function SalesReportPage() {
       if (subCount > 0) dr.subscriptionAmount += subCount * 498;
     }
 
-    for (const c of deliveryFeeCharges) {
-      const day = String(c["date"] ?? "").slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
-      const amt = num(c["amount"]);
+    // Delivery fee (Others): sum `deliveryFeeOthers` by CLAIM DATE (not effective date).
+    // This supports delayed deliveries/redeliveries without rewriting historical order revenue.
+    for (const row of rows) {
+      const status = String(row["status"] ?? "");
+      if (isOrderExcludedFromSuccessMetrics(status)) continue;
+      const inv = String(row["invoiceNumber"] ?? "").trim();
+      if (!inv) continue;
+      const amt = num(row["deliveryFeeOthers"]);
       if (amt <= 0) continue;
-      add(day).deliveryFeeOthers += amt;
+      const claimDay = getClaimCalendarYmd(inv, claims as any);
+      if (!claimDay || !/^\d{4}-\d{2}-\d{2}$/.test(claimDay)) continue;
+      add(claimDay).deliveryFeeOthers += amt;
     }
 
     // Oldest → latest (top-down)
     return Array.from(out.values()).sort((a, b) => a.date.localeCompare(b.date));
-  }, [rows, settings, productPriceByName, affiliatePriceByPackagePrice, deliveryFeeCharges]);
+  }, [rows, settings, productPriceByName, affiliatePriceByPackagePrice, deliveryFeeCharges, claims]);
 
   const monthTotals = useMemo(() => {
     let pkg = 0;

@@ -124,9 +124,11 @@ export async function POST(req: Request) {
 
   if (deliveryCategory === "delivery") {
     const df = num(o.deliveryFee);
+    const dfo = num(o.deliveryFeeOthers);
     const mf = num(o.merchantFee);
     const ta = num(o.totalAmount);
     lineDetails.deliveryFee = df ?? num(baseRow["deliveryFee"]) ?? 0;
+    lineDetails.deliveryFeeOthers = dfo ?? num(baseRow["deliveryFeeOthers"]) ?? 0;
     lineDetails.merchantFee = mf ?? num(baseRow["merchantFee"]) ?? 0;
     lineDetails.totalAmount = ta ?? num(baseRow["totalAmount"]) ?? 0;
     lineDetails.shippingFullName =

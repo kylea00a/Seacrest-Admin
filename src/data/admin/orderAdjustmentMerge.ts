@@ -27,6 +27,7 @@ export function applyLineDetailsToRow(
     }
   }
   if (lineDetails.deliveryFee != null) out.deliveryFee = lineDetails.deliveryFee;
+  if (lineDetails.deliveryFeeOthers != null) out.deliveryFeeOthers = lineDetails.deliveryFeeOthers;
   if (lineDetails.merchantFee != null) out.merchantFee = lineDetails.merchantFee;
   if (lineDetails.totalAmount != null) out.totalAmount = lineDetails.totalAmount;
   if (lineDetails.shippingFullName != null) out.shippingFullName = lineDetails.shippingFullName;

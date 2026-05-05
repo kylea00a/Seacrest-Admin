@@ -288,6 +288,8 @@ export type OrderLineDetailOverride = {
   subscriptionsCount?: number;
   deliveryCategory?: "pickup" | "delivery";
   deliveryFee?: number;
+  /** Delivery fee applied on claim day (for delayed deliveries / redelivery charges). */
+  deliveryFeeOthers?: number;
   merchantFee?: number;
   totalAmount?: number;
   shippingFullName?: string;

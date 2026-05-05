@@ -46,6 +46,7 @@ type ParsedRow = {
   deliveryMethod: string;
   deliveryCourier: string;
   deliveryFee: number;
+  deliveryFeeOthers?: number;
   merchantFee: number;
   totalAmount: number;
   paymentMethod: string;
@@ -91,6 +92,7 @@ type LineEditDraft = {
   subscriptionsCount: string;
   deliveryCategory: "pickup" | "delivery";
   deliveryFee: string;
+  deliveryFeeOthers: string;
   merchantFee: string;
   totalAmount: string;
   shippingFullName: string;
@@ -128,6 +130,10 @@ function rowToLineEditDraft(r: ParsedRow, productKeys: string[]): LineEditDraft 
     subscriptionsCount: String(r.subscriptionsCount ?? 0),
     deliveryCategory,
     deliveryFee: r.deliveryFee != null && r.deliveryFee !== 0 ? String(r.deliveryFee) : "",
+    deliveryFeeOthers:
+      (r as any).deliveryFeeOthers != null && (r as any).deliveryFeeOthers !== 0
+        ? String((r as any).deliveryFeeOthers)
+        : "",
     merchantFee: r.merchantFee != null && r.merchantFee !== 0 ? String(r.merchantFee) : "",
     totalAmount: r.totalAmount != null && r.totalAmount !== 0 ? String(r.totalAmount) : "",
     shippingFullName: r.shippingFullName ?? "",
@@ -301,6 +307,7 @@ function OrderLineEditForm({
           {(
             [
               ["deliveryFee", "Delivery fee"],
+              ["deliveryFeeOthers", "Delivery fee (Others)"],
               ["merchantFee", "Merchant fee"],
               ["totalAmount", "Total amount"],
             ] as const
@@ -558,6 +565,7 @@ export default function OrdersPage() {
     subscriptionsCount: "0",
     deliveryCategory: "pickup",
     deliveryFee: "",
+    deliveryFeeOthers: "",
     merchantFee: "",
     totalAmount: "",
     shippingFullName: "",
@@ -621,6 +629,7 @@ export default function OrdersPage() {
       subscriptionsCount: "0",
       deliveryCategory: "pickup",
       deliveryFee: "",
+      deliveryFeeOthers: "",
       merchantFee: "",
       totalAmount: "",
       shippingFullName: "",
@@ -814,6 +823,7 @@ export default function OrdersPage() {
       };
       if (draft.deliveryCategory === "delivery") {
         lineDetails.deliveryFee = parseN(draft.deliveryFee);
+        lineDetails.deliveryFeeOthers = parseN(draft.deliveryFeeOthers);
         lineDetails.merchantFee = parseN(draft.merchantFee);
         lineDetails.totalAmount = parseN(draft.totalAmount);
         lineDetails.shippingFullName = draft.shippingFullName;
