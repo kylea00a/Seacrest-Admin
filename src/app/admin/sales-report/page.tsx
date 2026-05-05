@@ -35,7 +35,10 @@ export default function SalesReportPage() {
   const [error, setError] = useState<string | null>(null);
   const [settings, setSettings] = useState<AdminSettings | null>(null);
   const [month, setMonth] = useState<string>("");
+  /** Rows bucketed by effective date (normal month view). */
   const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
+  /** Rows that fall in the month by CLAIM schedule (can include older effective dates). */
+  const [rowsByClaim, setRowsByClaim] = useState<Array<Record<string, unknown>>>([]);
   const [claims, setClaims] = useState<Record<string, any>>({});
   const [deliveryFeeCharges, setDeliveryFeeCharges] = useState<Array<Record<string, unknown>>>([]);
   const [cashAccounts, setCashAccounts] = useState<BankAccount[]>([]);
@@ -79,16 +82,23 @@ export default function SalesReportPage() {
       setLoading(true);
       setError(null);
       try {
-        const [res, dfRes] = await Promise.all([
+        const [res, claimRes, dfRes] = await Promise.all([
           fetch(`/api/admin/orders/compiled?start=${range.start}&end=${range.end}`, { cache: "no-store" }),
+          fetch(
+            `/api/admin/orders/compiled?start=${range.start}&end=${range.end}&scheduleByClaim=1`,
+            { cache: "no-store" },
+          ),
           fetch(`/api/admin/delivery-fee-charges?start=${range.start}&end=${range.end}`, { cache: "no-store" }),
         ]);
         const json = (await res.json()) as { rows?: Array<Record<string, unknown>>; claims?: Record<string, unknown>; error?: string };
+        const claimJson = (await claimRes.json()) as { rows?: Array<Record<string, unknown>>; claims?: Record<string, unknown>; error?: string };
         const dfJson = (await dfRes.json()) as { charges?: Array<Record<string, unknown>>; error?: string };
         if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
+        if (!claimRes.ok) throw new Error(claimJson.error ?? `Failed with status ${claimRes.status}`);
         if (!dfRes.ok) throw new Error(dfJson.error ?? `Failed with status ${dfRes.status}`);
         if (cancelled) return;
         setRows(json.rows ?? []);
+        setRowsByClaim(claimJson.rows ?? []);
         setClaims((json.claims ?? {}) as Record<string, any>);
         // Keep legacy/optional ledger (still shown in drilldown), but "Delivery fee (Others)" is now computed from orders' deliveryFeeOthers by claim date.
         setDeliveryFeeCharges(dfJson.charges ?? []);
@@ -244,7 +254,7 @@ export default function SalesReportPage() {
 
     // Delivery fee (Others): sum `deliveryFeeOthers` by CLAIM DATE (not effective date).
     // This supports delayed deliveries/redeliveries without rewriting historical order revenue.
-    for (const row of rows) {
+    for (const row of rowsByClaim) {
       const status = String(row["status"] ?? "");
       if (isOrderExcludedFromSuccessMetrics(status)) continue;
       const inv = String(row["invoiceNumber"] ?? "").trim();
@@ -260,7 +270,7 @@ export default function SalesReportPage() {
 
     // Oldest → latest (top-down)
     return Array.from(out.values()).sort((a, b) => a.date.localeCompare(b.date));
-  }, [rows, settings, productPriceByName, affiliatePriceByPackagePrice, deliveryFeeCharges, claims, month]);
+  }, [rows, rowsByClaim, settings, productPriceByName, affiliatePriceByPackagePrice, deliveryFeeCharges, claims, month]);
 
   const monthTotals = useMemo(() => {
     let pkg = 0;
