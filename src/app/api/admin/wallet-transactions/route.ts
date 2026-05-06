@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { parseWalletTransactionsWorkbook } from "@/data/admin/walletParse";
-import { loadWalletTransactions, prunePayoutReceiptsForRowIds, saveWalletTransactions } from "@/data/admin/walletStore";
+import {
+  deleteWalletTransactions,
+  loadWalletTransactions,
+  prunePayoutReceiptsForRowIds,
+  saveWalletTransactions,
+} from "@/data/admin/walletStore";
 import { requireApiAnyPermission, requireApiPermission } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
@@ -49,4 +54,11 @@ export async function POST(req: Request) {
     filename: file.name || "wallet.xlsx",
     rowCount: rows.length,
   });
+}
+
+export async function DELETE(req: Request) {
+  const auth = await requireApiPermission(req, "pettyCash");
+  if (auth instanceof NextResponse) return auth;
+  const ok = deleteWalletTransactions();
+  return NextResponse.json({ ok });
 }

@@ -5,10 +5,16 @@ import type { WalletPayoutReceipt, WalletTransactionsFile } from "./types";
 const PROJECT_ROOT = process.cwd();
 const WALLET_PATH = path.join(PROJECT_ROOT, "data", "admin", "wallet_transactions.json");
 const RECEIPTS_PATH = path.join(PROJECT_ROOT, "data", "admin", "wallet_payout_receipts.json");
+const WALLET_STAGING_DIR = path.join(PROJECT_ROOT, "data", "admin", "wallet_transactions_staging");
 
 function ensureDir() {
   const dir = path.dirname(WALLET_PATH);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+function ensureStagingDir() {
+  ensureDir();
+  if (!fs.existsSync(WALLET_STAGING_DIR)) fs.mkdirSync(WALLET_STAGING_DIR, { recursive: true });
 }
 
 const emptyFile = (): WalletTransactionsFile => ({
@@ -35,6 +41,17 @@ export function loadWalletTransactions(): WalletTransactionsFile {
 export function saveWalletTransactions(data: WalletTransactionsFile) {
   ensureDir();
   fs.writeFileSync(WALLET_PATH, JSON.stringify(data, null, 2), "utf8");
+}
+
+export function deleteWalletTransactions(): boolean {
+  ensureDir();
+  if (!fs.existsSync(WALLET_PATH)) return false;
+  try {
+    fs.unlinkSync(WALLET_PATH);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function loadPayoutReceipts(): Record<string, WalletPayoutReceipt> {
@@ -66,4 +83,29 @@ export function prunePayoutReceiptsForRowIds(currentIds: Set<string>): Record<st
     savePayoutReceipts(next);
   }
   return next;
+}
+
+export function saveWalletTransactionsStaging(token: string, payload: unknown) {
+  ensureStagingDir();
+  fs.writeFileSync(path.join(WALLET_STAGING_DIR, `${token}.json`), JSON.stringify(payload, null, 2), "utf8");
+}
+
+export function readWalletTransactionsStaging(token: string): unknown | null {
+  const p = path.join(WALLET_STAGING_DIR, `${token}.json`);
+  if (!fs.existsSync(p)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(p, "utf8")) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+export function deleteWalletTransactionsStaging(token: string) {
+  const p = path.join(WALLET_STAGING_DIR, `${token}.json`);
+  if (!fs.existsSync(p)) return;
+  try {
+    fs.unlinkSync(p);
+  } catch {
+    /* ignore */
+  }
 }
