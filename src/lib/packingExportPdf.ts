@@ -217,12 +217,17 @@ export function buildPackingExportPdfBlob(opts: PackingPdfOpts): Blob {
   summaryY += 5;
 
   const summaryRows = aggregatePackingSummaryRows(groups, productKeys, productAbbreviations);
+  const totalPackages = summaryRows.reduce((acc, r) => {
+    const v = r?.[0];
+    const n = typeof v === "number" ? v : Number(v);
+    return acc + (Number.isFinite(n) ? n : 0);
+  }, 0);
   const summaryBody: (string | number)[][] =
     summaryRows.length > 0 ? summaryRows : [["—", "—", "No products in export"]];
 
   autoTable(doc, {
     startY: summaryY,
-    head: [["Total Package", "UOM", "Description"]],
+    head: [[String(totalPackages || ""), "", ""], ["Total Package", "UOM", "Description"]],
     body: summaryBody,
     styles: {
       fontSize: 8,
@@ -239,6 +244,14 @@ export function buildPackingExportPdfBlob(opts: PackingPdfOpts): Blob {
     },
     margin: { left: margin, right: margin },
     tableWidth: tableInnerW,
+    didParseCell: (data) => {
+      if (data.section === "head" && data.row.index === 0) {
+        data.cell.styles.fillColor = [255, 255, 255];
+        data.cell.styles.textColor = 20;
+        data.cell.styles.fontStyle = "bold";
+        if (data.column.index !== 0) data.cell.text = [""];
+      }
+    },
   });
 
   return doc.output("blob");
