@@ -18,6 +18,16 @@ function currency(n: number) {
   }
 }
 
+async function safeReadJson<T>(res: Response): Promise<T> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const snippet = text.slice(0, 160).replace(/\s+/g, " ").trim();
+    throw new Error(`Bad response (${res.status}). Expected JSON but got: ${snippet || "(empty)"}`);
+  }
+}
+
 function monthToRange(yyyyMm: string): { start: string; end: string } | null {
   const m = yyyyMm.match(/^(\d{4})-(\d{2})$/);
   if (!m) return null;
@@ -37,10 +47,11 @@ export default function SalesReportPage() {
   const [month, setMonth] = useState<string>("");
   /** Rows bucketed by effective date (normal month view). */
   const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
-  /** Rows that fall in the month by CLAIM schedule (can include older effective dates). */
-  const [rowsByClaim, setRowsByClaim] = useState<Array<Record<string, unknown>>>([]);
   const [claims, setClaims] = useState<Record<string, any>>({});
-  const [deliveryFeeCharges, setDeliveryFeeCharges] = useState<Array<Record<string, unknown>>>([]);
+  const [deliveryFeeOthersByDay, setDeliveryFeeOthersByDay] = useState<Record<string, number>>({});
+  const [deliveryFeeOthersItems, setDeliveryFeeOthersItems] = useState<Array<{ date: string; invoiceNumber: string; amount: number }>>(
+    [],
+  );
   const [cashAccounts, setCashAccounts] = useState<BankAccount[]>([]);
   const [cashTx, setCashTx] = useState<CashTransaction[]>([]);
   const [depositAccountId, setDepositAccountId] = useState<string>("");
@@ -82,26 +93,23 @@ export default function SalesReportPage() {
       setLoading(true);
       setError(null);
       try {
-        const [res, claimRes, dfRes] = await Promise.all([
+        const [res, otherRes] = await Promise.all([
           fetch(`/api/admin/orders/compiled?start=${range.start}&end=${range.end}`, { cache: "no-store" }),
-          fetch(
-            `/api/admin/orders/compiled?start=${range.start}&end=${range.end}&scheduleByClaim=1`,
-            { cache: "no-store" },
-          ),
-          fetch(`/api/admin/delivery-fee-charges?start=${range.start}&end=${range.end}`, { cache: "no-store" }),
+          fetch(`/api/admin/sales-report/delivery-fee-others?start=${range.start}&end=${range.end}`, { cache: "no-store" }),
         ]);
-        const json = (await res.json()) as { rows?: Array<Record<string, unknown>>; claims?: Record<string, unknown>; error?: string };
-        const claimJson = (await claimRes.json()) as { rows?: Array<Record<string, unknown>>; claims?: Record<string, unknown>; error?: string };
-        const dfJson = (await dfRes.json()) as { charges?: Array<Record<string, unknown>>; error?: string };
+        const json = await safeReadJson<{ rows?: Array<Record<string, unknown>>; claims?: Record<string, unknown>; error?: string }>(res);
+        const otherJson = await safeReadJson<{
+          byDay?: Record<string, number>;
+          items?: Array<{ date: string; invoiceNumber: string; amount: number }>;
+          error?: string;
+        }>(otherRes);
         if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
-        if (!claimRes.ok) throw new Error(claimJson.error ?? `Failed with status ${claimRes.status}`);
-        if (!dfRes.ok) throw new Error(dfJson.error ?? `Failed with status ${dfRes.status}`);
+        if (!otherRes.ok) throw new Error(otherJson.error ?? `Failed with status ${otherRes.status}`);
         if (cancelled) return;
         setRows(json.rows ?? []);
-        setRowsByClaim(claimJson.rows ?? []);
         setClaims((json.claims ?? {}) as Record<string, any>);
-        // Keep legacy/optional ledger (still shown in drilldown), but "Delivery fee (Others)" is now computed from orders' deliveryFeeOthers by claim date.
-        setDeliveryFeeCharges(dfJson.charges ?? []);
+        setDeliveryFeeOthersByDay((otherJson.byDay ?? {}) as Record<string, number>);
+        setDeliveryFeeOthersItems((otherJson.items ?? []) as Array<{ date: string; invoiceNumber: string; amount: number }>);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -254,23 +262,16 @@ export default function SalesReportPage() {
 
     // Delivery fee (Others): sum `deliveryFeeOthers` by CLAIM DATE (not effective date).
     // This supports delayed deliveries/redeliveries without rewriting historical order revenue.
-    for (const row of rowsByClaim) {
-      const status = String(row["status"] ?? "");
-      if (isOrderExcludedFromSuccessMetrics(status)) continue;
-      const inv = String(row["invoiceNumber"] ?? "").trim();
-      if (!inv) continue;
-      const amt = num(row["deliveryFeeOthers"]);
-      if (amt <= 0) continue;
-      const claimDay = getClaimCalendarYmd(inv, claims as any);
-      if (!claimDay || !/^\d{4}-\d{2}-\d{2}$/.test(claimDay)) continue;
-      // Keep month table clean: only show claim-day fees if claim day is inside selected month.
-      if (range && (claimDay < range.start || claimDay > range.end)) continue;
-      add(claimDay).deliveryFeeOthers += amt;
+    if (range) {
+      for (const [day, amt] of Object.entries(deliveryFeeOthersByDay)) {
+        if (day < range.start || day > range.end) continue;
+        if (amt > 0) add(day).deliveryFeeOthers += amt;
+      }
     }
 
     // Oldest → latest (top-down)
     return Array.from(out.values()).sort((a, b) => a.date.localeCompare(b.date));
-  }, [rows, rowsByClaim, settings, productPriceByName, affiliatePriceByPackagePrice, deliveryFeeCharges, claims, month]);
+  }, [rows, settings, productPriceByName, affiliatePriceByPackagePrice, deliveryFeeOthersByDay, month]);
 
   const monthTotals = useMemo(() => {
     let pkg = 0;
@@ -325,20 +326,20 @@ export default function SalesReportPage() {
       })
       .sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
 
-    const charges = deliveryFeeCharges
-      .filter((c) => String(c["date"] ?? "").slice(0, 10) === drilldownDay)
+    const charges = deliveryFeeOthersItems
+      .filter((c) => c.date === drilldownDay)
       .map((c) => ({
-        id: String(c["id"] ?? ""),
-        invoiceNumber: String(c["invoiceNumber"] ?? ""),
-        amount: num(c["amount"]),
-        note: String(c["note"] ?? ""),
+        id: `${c.invoiceNumber}-${c.date}`,
+        invoiceNumber: String(c.invoiceNumber ?? ""),
+        amount: Number(c.amount) || 0,
+        note: "Delivery fee (Others)",
       }))
       .sort((a, b) => (a.invoiceNumber || "").localeCompare(b.invoiceNumber || ""));
 
     const totals = daily.find((d) => d.date === drilldownDay) ?? null;
 
     return { byInvoice, charges, totals, excludedCount: excluded.length, includedCount: included.length };
-  }, [drilldownDay, rows, deliveryFeeCharges, daily]);
+  }, [drilldownDay, rows, deliveryFeeOthersItems, daily]);
 
   const depositedBySalesDay = useMemo(() => {
     const set = new Set<string>();
