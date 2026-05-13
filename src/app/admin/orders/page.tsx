@@ -110,6 +110,12 @@ function shortProductKey(k: string) {
   return k.replace("Chips - ", "Chips ");
 }
 
+function formatProductQty(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return "";
+  if (Number.isInteger(n)) return n.toLocaleString();
+  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
 function rowToLineEditDraft(r: ParsedRow, productKeys: string[]): LineEditDraft {
   const mapVals = (src: Record<string, number> | undefined) =>
     Object.fromEntries(
@@ -532,6 +538,7 @@ export default function OrdersPage() {
   const [adding, setAdding] = useState(false);
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkSelected, setBulkSelected] = useState<Record<string, boolean>>({});
+  const [bulkSelectedRows, setBulkSelectedRows] = useState<Record<string, ParsedRow>>({});
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkApplying, setBulkApplying] = useState(false);
   const [bulkDraft, setBulkDraft] = useState({
@@ -735,12 +742,54 @@ export default function OrdersPage() {
 
   const bulkSelectedInvoices = useMemo(() => Object.keys(bulkSelected).filter((k) => bulkSelected[k]), [bulkSelected]);
   const bulkSelectedList = useMemo(() => bulkSelectedInvoices.slice().sort((a, b) => a.localeCompare(b)), [bulkSelectedInvoices]);
+  const rowsByInvoice = useMemo(() => {
+    const m = new Map<string, ParsedRow>();
+    for (const r of rows) {
+      if (r.invoiceNumber) m.set(r.invoiceNumber, r);
+    }
+    return m;
+  }, [rows]);
+  const bulkSelectedProductSummary = useMemo(() => {
+    const selectedRows = bulkSelectedList
+      .map((inv) => rowsByInvoice.get(inv) ?? bulkSelectedRows[inv])
+      .filter((r): r is ParsedRow => Boolean(r));
+    const makeMap = () => Object.fromEntries(productKeys.map((k) => [k, 0])) as Record<string, number>;
+    const packageProducts = makeMap();
+    const subscriptionProducts = makeMap();
+    const repurchaseProducts = makeMap();
+    const addProducts = (target: Record<string, number>, source: Record<string, number> | undefined) => {
+      for (const k of productKeys) {
+        const n = Number(source?.[k] ?? 0);
+        if (Number.isFinite(n)) target[k] += n;
+      }
+    };
+    for (const r of selectedRows) {
+      addProducts(packageProducts, r.packageProducts);
+      addProducts(subscriptionProducts, r.subscriptionProducts);
+      addProducts(repurchaseProducts, r.repurchaseProducts);
+    }
+    const toItems = (totals: Record<string, number>) =>
+      productKeys
+        .map((key) => ({ key, label: shortProductKey(key), qty: totals[key] ?? 0 }))
+        .filter((item) => item.qty > 0);
+    const sum = (totals: Record<string, number>) => Object.values(totals).reduce((acc, n) => acc + (Number.isFinite(n) ? n : 0), 0);
+    return {
+      orderCount: bulkSelectedList.length,
+      missingCount: Math.max(0, bulkSelectedList.length - selectedRows.length),
+      sections: [
+        { key: "package", label: "Package products", total: sum(packageProducts), items: toItems(packageProducts) },
+        { key: "subscription", label: "Subscription products", total: sum(subscriptionProducts), items: toItems(subscriptionProducts) },
+        { key: "repurchase", label: "Repurchase products", total: sum(repurchaseProducts), items: toItems(repurchaseProducts) },
+      ],
+    };
+  }, [bulkSelectedList, bulkSelectedRows, productKeys, rowsByInvoice]);
 
   const toggleBulkMode = () => {
     if (!bulkMode) {
       setBulkMode(true);
       setBulkOpen(false);
       setBulkSelected({});
+      setBulkSelectedRows({});
       return;
     }
     // Already in bulk mode:
@@ -752,6 +801,7 @@ export default function OrdersPage() {
       setBulkOpen(false);
       setBulkMode(false);
       setBulkSelected({});
+      setBulkSelectedRows({});
     }
   };
 
@@ -781,6 +831,7 @@ export default function OrdersPage() {
       setBulkOpen(false);
       setBulkMode(false);
       setBulkSelected({});
+      setBulkSelectedRows({});
       // Reload current view.
       if (search.trim()) void refetchSearchRows();
       else void refetchCompiledRows();
@@ -1297,7 +1348,10 @@ export default function OrdersPage() {
             </button>
             <button
               type="button"
-              onClick={() => setBulkSelected({})}
+              onClick={() => {
+                setBulkSelected({});
+                setBulkSelectedRows({});
+              }}
               disabled={bulkApplying}
               className="admin-btn-secondary"
             >
@@ -1327,6 +1381,14 @@ export default function OrdersPage() {
                       setBulkSelected((prev) => {
                         const next = { ...prev };
                         for (const r of visibleRows) next[r.invoiceNumber] = on;
+                        return next;
+                      });
+                      setBulkSelectedRows((prev) => {
+                        const next = { ...prev };
+                        for (const r of visibleRows) {
+                          if (on) next[r.invoiceNumber] = r;
+                          else delete next[r.invoiceNumber];
+                        }
                         return next;
                       });
                     }}
@@ -1624,7 +1686,16 @@ export default function OrdersPage() {
                         <input
                           type="checkbox"
                           checked={Boolean(bulkSelected[inv])}
-                          onChange={(e) => setBulkSelected((p) => ({ ...p, [inv]: e.target.checked }))}
+                          onChange={(e) => {
+                            const on = e.target.checked;
+                            setBulkSelected((p) => ({ ...p, [inv]: on }));
+                            setBulkSelectedRows((p) => {
+                              const next = { ...p };
+                              if (on) next[inv] = r;
+                              else delete next[inv];
+                              return next;
+                            });
+                          }}
                           className="rounded border-white/20"
                         />
                       </td>
@@ -1923,16 +1994,69 @@ export default function OrdersPage() {
                 These stay selected even when you change date range / page.
               </div>
             </div>
-            <button type="button" onClick={() => setBulkSelected({})} className="admin-btn-secondary px-3 py-2 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                setBulkSelected({});
+                setBulkSelectedRows({});
+              }}
+              className="admin-btn-secondary px-3 py-2 text-xs"
+            >
               Clear
             </button>
+          </div>
+          <div className="mt-3 grid gap-3 lg:grid-cols-[12rem_1fr]">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+              <div className="text-[11px] uppercase tracking-wide text-zinc-500">Total orders selected</div>
+              <div className="mt-1 text-2xl font-bold tabular-nums text-white">
+                {bulkSelectedProductSummary.orderCount.toLocaleString()}
+              </div>
+              {bulkSelectedProductSummary.missingCount > 0 ? (
+                <div className="mt-1 text-[11px] text-amber-200">
+                  {bulkSelectedProductSummary.missingCount.toLocaleString()} selected order(s) need to be loaded again to count products.
+                </div>
+              ) : null}
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              {bulkSelectedProductSummary.sections.map((section) => (
+                <div key={section.key} className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="text-xs font-semibold text-zinc-200">{section.label}</div>
+                    <div className="text-xs font-bold tabular-nums text-emerald-200">
+                      {formatProductQty(section.total) || "0"}
+                    </div>
+                  </div>
+                  {section.items.length > 0 ? (
+                    <div className="mt-2 space-y-1">
+                      {section.items.map((item) => (
+                        <div key={`${section.key}-${item.key}`} className="flex justify-between gap-3 text-[11px]">
+                          <span className="truncate text-zinc-400" title={item.key}>
+                            {item.label}
+                          </span>
+                          <span className="font-semibold tabular-nums text-zinc-100">{formatProductQty(item.qty)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-2 text-[11px] text-zinc-500">No products selected.</div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             {bulkSelectedList.map((inv) => (
               <button
                 key={`sel-${inv}`}
                 type="button"
-                onClick={() => setBulkSelected((p) => ({ ...p, [inv]: false }))}
+                onClick={() => {
+                  setBulkSelected((p) => ({ ...p, [inv]: false }));
+                  setBulkSelectedRows((p) => {
+                    const next = { ...p };
+                    delete next[inv];
+                    return next;
+                  });
+                }}
                 className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-white/10"
                 title="Click to remove from selection"
               >
