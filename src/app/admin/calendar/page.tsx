@@ -409,9 +409,9 @@ export default function CalendarPage() {
                 <div className="text-xs font-bold text-white">{ev.amount ? currency(ev.amount) : ""}</div>
               </div>
               {ev.kind === "pettyCash" ? (
-                <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="mt-3 flex flex-col gap-2">
                   <div className="text-[10px] font-semibold text-zinc-300">Type</div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-full border border-white/15 bg-white/10 px-1.5 py-0.5 text-[9px] font-bold text-zinc-200">
                       Petty cash request
                     </span>
@@ -436,9 +436,9 @@ export default function CalendarPage() {
                   </div>
                 </div>
               ) : ev.kind === "reminder" ? (
-                <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="mt-3 flex flex-col gap-2">
                   <div className="text-[10px] font-semibold text-zinc-300">Reminder status</div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className={statusChipClass("pending")}>Pending</span>
                     <button
                       type="button"
@@ -452,7 +452,7 @@ export default function CalendarPage() {
                   </div>
                 </div>
               ) : (
-                <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="mt-3 flex flex-col gap-2">
                   <div className="text-[10px] font-semibold text-zinc-300">Status</div>
                   {ev.paymentStatus === "paid" ? (
                     <button
@@ -464,12 +464,12 @@ export default function CalendarPage() {
                       Completed
                     </button>
                   ) : (
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className={statusChipClass("pending")}>Pending</span>
                       <select
                         value={deductChoiceByExpenseId[ev.expenseId] ?? ""}
                         onChange={(e) => setDeductChoiceByExpenseId((p) => ({ ...p, [ev.expenseId]: e.target.value }))}
-                        className="admin-select py-1 text-[11px]"
+                        className="admin-select min-w-[10rem] flex-1 py-1 text-[11px]"
                         disabled={savingExpenseId === ev.expenseId}
                       >
                         <option value="">Deduct from…</option>
