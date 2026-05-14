@@ -42,8 +42,10 @@ export function buildCalendarEventsForMonth(params: {
   }
 
   for (const r of reminders) {
+    const completedDates = new Set(Array.isArray(r.completedDates) ? r.completedDates : []);
     const occurrences = getExpenseOccurrencesInRange(r as unknown as Expense, start, end);
     for (const date of occurrences) {
+      if (completedDates.has(date)) continue;
       events.push({
         date,
         expenseId: `reminder:${r.id}`,

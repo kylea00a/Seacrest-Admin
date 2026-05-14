@@ -32,6 +32,32 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const auth = await requireApiPermission(req, "calendar");
   if (auth instanceof NextResponse) return auth;
+  const url = new URL(req.url);
+  const action = url.searchParams.get("action")?.trim() ?? "";
+  if (action === "status") {
+    const body = (await req.json()) as { reminderId?: unknown; date?: unknown; status?: unknown };
+    const reminderId = typeof body.reminderId === "string" ? body.reminderId.trim() : "";
+    const date = typeof body.date === "string" ? body.date.trim() : "";
+    const status = body.status === "pending" || body.status === "completed" ? body.status : "";
+    if (!reminderId) return NextResponse.json({ error: "Missing `reminderId`." }, { status: 400 });
+    if (!isDateOnly(date)) return NextResponse.json({ error: "Invalid `date` (YYYY-MM-DD)." }, { status: 400 });
+    if (!status) return NextResponse.json({ error: "Invalid `status`." }, { status: 400 });
+
+    const list = loadReminders();
+    const idx = list.findIndex((r) => r.id === reminderId);
+    if (idx < 0) return NextResponse.json({ error: "Reminder not found." }, { status: 404 });
+
+    const existing = new Set(Array.isArray(list[idx]!.completedDates) ? list[idx]!.completedDates : []);
+    if (status === "completed") existing.add(date);
+    else existing.delete(date);
+    list[idx] = {
+      ...list[idx]!,
+      completedDates: Array.from(existing).sort((a, b) => a.localeCompare(b)),
+    };
+    saveReminders(list);
+    return NextResponse.json({ ok: true, reminder: list[idx] });
+  }
+
   const body = (await req.json()) as Partial<Reminder>;
   const title = typeof body.title === "string" ? body.title.trim() : "";
   const startDate = typeof body.startDate === "string" ? body.startDate.trim() : "";
@@ -48,6 +74,7 @@ export async function POST(req: Request) {
     repeatEveryMonths: body.repeatEveryMonths,
     repeatCount: body.repeatCount,
     notes: typeof body.notes === "string" ? body.notes.trim() : undefined,
+    completedDates: [],
     createdAt: now,
   };
   const list = loadReminders();

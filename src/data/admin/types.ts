@@ -77,6 +77,8 @@ export interface Reminder {
   repeatEveryMonths?: number;
   repeatCount?: number;
   notes?: string;
+  /** Reminder occurrences marked completed; completed dates are hidden from the calendar. */
+  completedDates?: string[];
   createdAt: string; // ISO
 }
 

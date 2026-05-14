@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CalendarEvent } from "@/data/admin/types";
 import type { BankAccount } from "@/data/admin/types";
 import { useAdminSession } from "../AdminSessionContext";
@@ -28,6 +28,8 @@ function addDays(d: Date, days: number): Date {
 const STATUS_STYLES: Record<string, { pill: string; border: string }> = {
   paid: { pill: "bg-emerald-500/20 text-emerald-100", border: "border-emerald-500/35" },
   unpaid: { pill: "bg-amber-500/15 text-amber-100", border: "border-amber-500/30" },
+  pending: { pill: "bg-amber-500/15 text-amber-100", border: "border-amber-500/30" },
+  completed: { pill: "bg-emerald-500/20 text-emerald-100", border: "border-emerald-500/35" },
 };
 
 function statusChipClass(status: string) {
@@ -45,6 +47,14 @@ function currency(n: number) {
   }
 }
 
+function eventStatusLabel(ev: CalendarEvent): "Pending" | "Completed" {
+  return ev.paymentStatus === "paid" ? "Completed" : "Pending";
+}
+
+function eventStatusKey(ev: CalendarEvent): "pending" | "completed" {
+  return ev.paymentStatus === "paid" ? "completed" : "pending";
+}
+
 export default function CalendarPage() {
   const { account } = useAdminSession();
   const now = new Date();
@@ -59,6 +69,7 @@ export default function CalendarPage() {
   const [savingExpenseId, setSavingExpenseId] = useState<string>("");
   const [deductAccounts, setDeductAccounts] = useState<BankAccount[]>([]);
   const [deductChoiceByExpenseId, setDeductChoiceByExpenseId] = useState<Record<string, string>>({});
+  const [savingReminderKey, setSavingReminderKey] = useState<string>("");
 
   useEffect(() => {
     let cancelled = false;
@@ -80,8 +91,20 @@ export default function CalendarPage() {
   }, []);
 
   const [selectedDate, setSelectedDate] = useState<string>("");
-  const [showPaid, setShowPaid] = useState(false);
-  const [showUnpaid, setShowUnpaid] = useState(true);
+
+  const refreshCalendar = useCallback(async () => {
+    const res = await fetch(`/api/admin/calendar?year=${year}&month=${month}`, { cache: "no-store" });
+    const json = (await res.json()) as {
+      events?: CalendarEvent[];
+      inventoryDiscrepancyDates?: string[];
+      pettyPending?: Array<Record<string, unknown>>;
+      error?: string;
+    };
+    if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
+    setEvents(json.events ?? []);
+    setInventoryDiscrepancyDates(new Set((json.inventoryDiscrepancyDates ?? []).filter(Boolean)));
+    setPettyPending(Array.isArray(json.pettyPending) ? json.pettyPending : []);
+  }, [year, month]);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,18 +113,8 @@ export default function CalendarPage() {
 
     async function load() {
       try {
-        const res = await fetch(`/api/admin/calendar?year=${year}&month=${month}`, { cache: "no-store" });
-        const json = (await res.json()) as {
-          events?: CalendarEvent[];
-          inventoryDiscrepancyDates?: string[];
-          pettyPending?: Array<Record<string, unknown>>;
-          error?: string;
-        };
-        if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
+        await refreshCalendar();
         if (cancelled) return;
-        setEvents(json.events ?? []);
-        setInventoryDiscrepancyDates(new Set((json.inventoryDiscrepancyDates ?? []).filter(Boolean)));
-        setPettyPending(Array.isArray(json.pettyPending) ? json.pettyPending : []);
       } catch (e) {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : String(e));
@@ -114,7 +127,7 @@ export default function CalendarPage() {
     return () => {
       cancelled = true;
     };
-  }, [year, month]);
+  }, [refreshCalendar]);
 
   const allEvents = useMemo(() => {
     const pettyEvents: CalendarEvent[] = pettyPending.map((r) => {
@@ -136,8 +149,8 @@ export default function CalendarPage() {
   }, [events, pettyPending]);
 
   const visibleEvents = useMemo(() => {
-    return allEvents.filter((ev) => (ev.paymentStatus === "paid" ? showPaid : showUnpaid));
-  }, [allEvents, showPaid, showUnpaid]);
+    return allEvents.filter((ev) => ev.paymentStatus !== "paid");
+  }, [allEvents]);
 
   const eventsByDate = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
@@ -168,12 +181,23 @@ export default function CalendarPage() {
   }, [year, month]);
 
   const selectedEvents = selectedDate ? eventsByDate.get(selectedDate) ?? [] : [];
+  const pendingSummary = useMemo(() => {
+    const pending = visibleEvents
+      .filter((ev) => ev.kind === "bill" || ev.kind === "reminder")
+      .slice()
+      .sort((a, b) => (a.date === b.date ? a.title.localeCompare(b.title) : a.date.localeCompare(b.date)));
+    const reminders = pending.filter((ev) => ev.kind === "reminder");
+    const expenses = pending.filter((ev) => ev.kind === "bill");
+    const expenseTotal = expenses.reduce((acc, ev) => acc + ev.amount, 0);
+    return { pending, reminders, expenses, expenseTotal };
+  }, [visibleEvents]);
+
   const monthTotals = useMemo(() => {
     const totalsByCategory = new Map<string, number>();
-    for (const ev of visibleEvents)
+    for (const ev of pendingSummary.expenses)
       totalsByCategory.set(ev.category, (totalsByCategory.get(ev.category) ?? 0) + ev.amount);
     return Array.from(totalsByCategory.entries()).sort((a, b) => b[1] - a[1]);
-  }, [visibleEvents]);
+  }, [pendingSummary.expenses]);
 
   const goPrevMonth = () => {
     const d = new Date(year, month - 2, 1);
@@ -200,15 +224,7 @@ export default function CalendarPage() {
       const json = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
       // Reload month so both grid and day details update.
-      const r2 = await fetch(`/api/admin/calendar?year=${year}&month=${month}`, { cache: "no-store" });
-      const j2 = (await r2.json()) as {
-        events?: CalendarEvent[];
-        inventoryDiscrepancyDates?: string[];
-        error?: string;
-      };
-      if (!r2.ok) throw new Error(j2.error ?? `Failed with status ${r2.status}`);
-      setEvents(j2.events ?? []);
-      setInventoryDiscrepancyDates(new Set((j2.inventoryDiscrepancyDates ?? []).filter(Boolean)));
+      await refreshCalendar();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -227,11 +243,7 @@ export default function CalendarPage() {
       });
       const json = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
-      const r2 = await fetch(`/api/admin/calendar?year=${year}&month=${month}`, { cache: "no-store" });
-      const j2 = (await r2.json()) as any;
-      setEvents(j2.events ?? []);
-      setInventoryDiscrepancyDates(new Set((j2.inventoryDiscrepancyDates ?? []).filter(Boolean)));
-      setPettyPending(Array.isArray(j2.pettyPending) ? j2.pettyPending : []);
+      await refreshCalendar();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -249,13 +261,31 @@ export default function CalendarPage() {
       });
       const j = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(j.error ?? `Failed (${res.status})`);
-      const r2 = await fetch(`/api/admin/calendar?year=${year}&month=${month}`, { cache: "no-store" });
-      const j2 = (await r2.json()) as any;
-      setEvents(j2.events ?? []);
-      setInventoryDiscrepancyDates(new Set((j2.inventoryDiscrepancyDates ?? []).filter(Boolean)));
-      setPettyPending(Array.isArray(j2.pettyPending) ? j2.pettyPending : []);
+      await refreshCalendar();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const completeReminder = async (ev: CalendarEvent) => {
+    const reminderId = ev.expenseId.replace(/^reminder:/, "");
+    if (!reminderId || !ev.date) return;
+    const key = `${reminderId}:${ev.date}`;
+    setSavingReminderKey(key);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/reminders?action=status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reminderId, date: ev.date, status: "completed" }),
+      });
+      const json = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
+      await refreshCalendar();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingReminderKey("");
     }
   };
 
@@ -281,23 +311,8 @@ export default function CalendarPage() {
           </div>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 text-sm text-zinc-200">
-            <input
-              type="checkbox"
-              checked={showUnpaid}
-              onChange={(e) => setShowUnpaid(e.target.checked)}
-            />
-            Unpaid
-          </label>
-          <label className="flex items-center gap-2 text-sm text-zinc-200">
-            <input
-              type="checkbox"
-              checked={showPaid}
-              onChange={(e) => setShowPaid(e.target.checked)}
-            />
-            Paid
-          </label>
+        <div className="mt-3 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-zinc-300">
+          Calendar shows pending expenses and reminders only. Completed items are hidden from the calendar.
         </div>
 
         <div className="mt-4 grid grid-cols-7 gap-1 text-center text-xs font-semibold text-zinc-400">
@@ -345,8 +360,8 @@ export default function CalendarPage() {
                         <span className="min-w-0 flex-1 truncate text-zinc-100">
                           {ev.title}
                         </span>
-                        <span className={statusChipClass(ev.paymentStatus)}>
-                          {ev.paymentStatus === "paid" ? "Paid" : "Unpaid"}
+                        <span className={statusChipClass(eventStatusKey(ev))}>
+                          {eventStatusLabel(ev)}
                         </span>
                       </div>
                       <div className="mt-0.5 flex items-center justify-between gap-2 text-[10px] text-zinc-400">
@@ -422,10 +437,19 @@ export default function CalendarPage() {
                 </div>
               ) : ev.kind === "reminder" ? (
                 <div className="mt-2 flex items-center justify-between gap-2">
-                  <div className="text-[10px] font-semibold text-zinc-300">Type</div>
-                  <span className="rounded-full border border-white/15 bg-white/10 px-1.5 py-0.5 text-[9px] font-bold text-zinc-200">
-                    Reminder
-                  </span>
+                  <div className="text-[10px] font-semibold text-zinc-300">Reminder status</div>
+                  <div className="flex items-center gap-2">
+                    <span className={statusChipClass("pending")}>Pending</span>
+                    <button
+                      type="button"
+                      disabled={savingReminderKey === `${ev.expenseId.replace(/^reminder:/, "")}:${ev.date}`}
+                      onClick={() => void completeReminder(ev)}
+                      className="admin-btn-primary px-2 py-1 text-[11px]"
+                      title="Mark reminder completed"
+                    >
+                      {savingReminderKey === `${ev.expenseId.replace(/^reminder:/, "")}:${ev.date}` ? "Saving…" : "Complete"}
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="mt-2 flex items-center justify-between gap-2">
@@ -437,10 +461,11 @@ export default function CalendarPage() {
                       className={statusChipClass(ev.paymentStatus)}
                       title="Paid items are read-only in calendar"
                     >
-                      Paid
+                      Completed
                     </button>
                   ) : (
                     <div className="flex items-center gap-2">
+                      <span className={statusChipClass("pending")}>Pending</span>
                       <select
                         value={deductChoiceByExpenseId[ev.expenseId] ?? ""}
                         onChange={(e) => setDeductChoiceByExpenseId((p) => ({ ...p, [ev.expenseId]: e.target.value }))}
@@ -464,9 +489,9 @@ export default function CalendarPage() {
                           else if (v.startsWith("bank:")) void togglePaid(ev, { type: "bank", accountId: v.slice("bank:".length) });
                         }}
                         className={statusChipClass(ev.paymentStatus)}
-                        title="Mark paid"
+                        title="Mark completed"
                       >
-                        {savingExpenseId === ev.expenseId ? "Saving…" : "Pay"}
+                        {savingExpenseId === ev.expenseId ? "Saving…" : "Complete"}
                       </button>
                       {account?.isSuperadmin ? (
                         <button
@@ -488,22 +513,79 @@ export default function CalendarPage() {
         </div>
 
         <div className="mt-5 border-t border-white/10 pt-4">
-          <div className="text-sm font-semibold">Month Totals</div>
-          <div className="mt-1 text-xs text-zinc-300">Sum of occurrences in this month</div>
-
-          <div className="mt-3 space-y-2">
-            {monthTotals.length === 0 && <div className="text-sm text-zinc-300">No expenses found.</div>}
-            {monthTotals.slice(0, 6).map(([cat, total]) => (
-              <div key={cat} className="flex items-center justify-between gap-3 text-sm">
-                <div className="truncate text-zinc-200">{cat}</div>
-                <div className="font-semibold text-white">{currency(total)}</div>
-              </div>
-            ))}
-            {monthTotals.length > 6 && (
-              <div className="text-xs text-zinc-300">+{monthTotals.length - 6} more categories</div>
-            )}
+          <div className="text-sm font-semibold">Pending Summary</div>
+          <div className="mt-1 text-xs text-zinc-300">
+            All pending reminders and expenses in {formatMonthLabel(year, month)}.
           </div>
-        </div>
+
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+              <div className="text-[11px] uppercase tracking-wide text-zinc-500">Pending reminders</div>
+              <div className="mt-1 text-xl font-bold tabular-nums text-white">
+                {pendingSummary.reminders.length.toLocaleString()}
+              </div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+              <div className="text-[11px] uppercase tracking-wide text-zinc-500">Pending expenses</div>
+              <div className="mt-1 text-xl font-bold tabular-nums text-white">
+                {pendingSummary.expenses.length.toLocaleString()}
+              </div>
+              <div className="mt-1 text-xs font-semibold text-zinc-300">{currency(pendingSummary.expenseTotal)}</div>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            {pendingSummary.pending.length === 0 ? (
+              <div className="text-sm text-zinc-300">No pending reminders or expenses this month.</div>
+            ) : (
+              pendingSummary.pending.slice(0, 12).map((ev) => (
+                <div key={`${ev.kind}-${ev.expenseId}-${ev.date}`} className="rounded-xl border border-white/10 bg-black/20 p-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-xs font-semibold text-white">{ev.title}</div>
+                      <div className="mt-0.5 text-[11px] text-zinc-400">
+                        {ev.date} • {ev.kind === "reminder" ? "Reminder" : ev.category}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {ev.amount ? <div className="text-xs font-bold text-white">{currency(ev.amount)}</div> : null}
+                      {ev.kind === "reminder" ? (
+                        <button
+                          type="button"
+                          disabled={savingReminderKey === `${ev.expenseId.replace(/^reminder:/, "")}:${ev.date}`}
+                          onClick={() => void completeReminder(ev)}
+                          className="admin-btn-secondary px-2 py-1 text-[11px]"
+                        >
+                          {savingReminderKey === `${ev.expenseId.replace(/^reminder:/, "")}:${ev.date}` ? "Saving…" : "Complete"}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+            {pendingSummary.pending.length > 12 ? (
+              <div className="text-xs text-zinc-300">+{pendingSummary.pending.length - 12} more pending item(s)</div>
+            ) : null}
+          </div>
+
+          {monthTotals.length > 0 ? (
+            <div className="mt-4 border-t border-white/10 pt-3">
+              <div className="text-xs font-semibold text-zinc-300">Pending expense totals by category</div>
+              <div className="mt-2 space-y-1">
+                {monthTotals.slice(0, 6).map(([cat, total]) => (
+                  <div key={cat} className="flex items-center justify-between gap-3 text-xs">
+                    <div className="truncate text-zinc-300">{cat}</div>
+                    <div className="font-semibold text-white">{currency(total)}</div>
+                  </div>
+                ))}
+                {monthTotals.length > 6 ? (
+                  <div className="text-xs text-zinc-300">+{monthTotals.length - 6} more categories</div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+          </div>
       </div>
     </div>
   );
