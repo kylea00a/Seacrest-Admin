@@ -47,6 +47,7 @@ export default function TelegramNotificationsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testingBotId, setTestingBotId] = useState("");
+  const [runningDueNow, setRunningDueNow] = useState(false);
   const [testMessages, setTestMessages] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -121,6 +122,22 @@ export default function TelegramNotificationsPage() {
     }
   };
 
+  const runDueNow = async () => {
+    setRunningDueNow(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/admin/telegram/calendar-due?runNow=1&force=1", { cache: "no-store" });
+      const json = await readJson<{ ok?: boolean; sent?: number; itemCount?: number; skipped?: string; error?: string }>(res);
+      if (!res.ok || !json.ok) throw new Error(json.error || json.skipped || `Failed (${res.status})`);
+      setNotice(json.skipped || `Due-now message sent to ${json.sent ?? 0} chat(s). Pending items found: ${json.itemCount ?? 0}.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunningDueNow(false);
+    }
+  };
+
   return (
     <div className="admin-card max-w-5xl">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -131,9 +148,20 @@ export default function TelegramNotificationsPage() {
             not shown again after saving.
           </p>
         </div>
-        <button type="button" onClick={() => setBots((p) => [...p, emptyBot()])} className="admin-btn-primary">
-          Add bot
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void runDueNow()}
+            disabled={runningDueNow}
+            className="admin-btn-secondary"
+            title="Immediately send today's pending reminder/expense summary using enabled bots"
+          >
+            {runningDueNow ? "Sending…" : "Run due now"}
+          </button>
+          <button type="button" onClick={() => setBots((p) => [...p, emptyBot()])} className="admin-btn-primary">
+            Add bot
+          </button>
+        </div>
       </div>
 
       {loading ? <div className="mt-4 text-sm text-zinc-300">Loading…</div> : null}

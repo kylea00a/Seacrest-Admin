@@ -9,11 +9,13 @@ import {
   saveTelegramSendLog,
 } from "@/data/admin/storage";
 import type { CalendarEvent, TelegramBotConfig, TelegramNotificationKind, TelegramNotificationSettings } from "@/data/admin/types";
+import { requireSuperadmin } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const MANILA_TIME_ZONE = "Asia/Manila";
+const SCHEDULE_GRACE_MINUTES = 15;
 
 function manilaTodayYmd(): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -47,12 +49,15 @@ function currency(n: number): string {
   return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(n);
 }
 
-function isAuthorized(req: Request): boolean {
+async function isAuthorized(req: Request): Promise<boolean> {
   const secret = process.env.TELEGRAM_CRON_SECRET?.trim();
-  if (!secret) return process.env.NODE_ENV !== "production";
   const auth = req.headers.get("authorization") ?? "";
   const url = new URL(req.url);
-  return auth === `Bearer ${secret}` || url.searchParams.get("secret") === secret || req.headers.get("x-vercel-cron") === "1";
+  if (secret && (auth === `Bearer ${secret}` || url.searchParams.get("secret") === secret)) return true;
+  if (req.headers.get("x-vercel-cron") === "1") return true;
+  if (!secret && process.env.NODE_ENV !== "production") return true;
+  const admin = await requireSuperadmin(req);
+  return !(admin instanceof NextResponse);
 }
 
 function dueItemsForDate(ymd: string): CalendarEvent[] {
@@ -171,21 +176,44 @@ function loadSettings(): TelegramNotificationSettings {
   return defaultSettingsFromEnv();
 }
 
-function dueBotSchedules(settings: TelegramNotificationSettings, hm: string, force: boolean): Array<{ bot: TelegramBotConfig; scheduleTime: string }> {
+function hmToMinutes(hm: string): number | null {
+  const m = hm.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function isScheduleDue(scheduleTime: string, currentHm: string): boolean {
+  const sched = hmToMinutes(scheduleTime);
+  const current = hmToMinutes(currentHm);
+  if (sched == null || current == null) return false;
+  const diff = current - sched;
+  return diff >= 0 && diff < SCHEDULE_GRACE_MINUTES;
+}
+
+function dueBotSchedules(
+  settings: TelegramNotificationSettings,
+  hm: string,
+  force: boolean,
+  runNow: boolean,
+): Array<{ bot: TelegramBotConfig; scheduleTime: string }> {
   const out: Array<{ bot: TelegramBotConfig; scheduleTime: string }> = [];
   for (const bot of settings.bots) {
     if (!bot.enabled || !bot.token?.trim()) continue;
     if (!bot.recipients.some((r) => r.enabled && r.chatId.trim())) continue;
+    if (runNow) {
+      out.push({ bot, scheduleTime: hm });
+      continue;
+    }
     for (const s of bot.schedules) {
       if (!s.enabled) continue;
-      if (force || s.time === hm) out.push({ bot, scheduleTime: s.time });
+      if (force || isScheduleDue(s.time, hm)) out.push({ bot, scheduleTime: s.time });
     }
   }
   return out;
 }
 
 export async function GET(req: Request) {
-  if (!isAuthorized(req)) {
+  if (!(await isAuthorized(req))) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
@@ -193,6 +221,7 @@ export async function GET(req: Request) {
   const date = url.searchParams.get("date")?.trim() || manilaTodayYmd();
   const hm = url.searchParams.get("time")?.trim() || manilaNowHm();
   const force = url.searchParams.get("force") === "1";
+  const runNow = url.searchParams.get("runNow") === "1";
   if (!parseYmd(date)) return NextResponse.json({ error: "Invalid `date` (YYYY-MM-DD)." }, { status: 400 });
 
   const items = dueItemsForDate(date);
@@ -201,9 +230,15 @@ export async function GET(req: Request) {
   }
 
   const settings = loadSettings();
-  const due = dueBotSchedules(settings, hm, force);
+  const due = dueBotSchedules(settings, hm, force, runNow);
   if (due.length === 0) {
-    return NextResponse.json({ ok: true, date, time: hm, sent: 0, skipped: "No enabled Telegram schedule matches this time." });
+    return NextResponse.json({
+      ok: true,
+      date,
+      time: hm,
+      sent: 0,
+      skipped: `No enabled Telegram schedule is due within ${SCHEDULE_GRACE_MINUTES} minutes.`,
+    });
   }
 
   const sentLog = loadTelegramSendLog();
