@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import type { AdminSettings } from "@/data/admin/types";
 import { isOrderExcludedFromSuccessMetrics, type ProductBreakdown } from "@/data/admin/ordersParse";
 import type { BankAccount, CashTransaction } from "@/data/admin/types";
-import { getClaimCalendarYmd } from "@/data/admin/orderClaim";
 
 function countFmt(n: number) {
   return new Intl.NumberFormat().format(n);
@@ -54,9 +53,9 @@ export default function SalesReportPage() {
   );
   const [cashAccounts, setCashAccounts] = useState<BankAccount[]>([]);
   const [cashTx, setCashTx] = useState<CashTransaction[]>([]);
-  const [depositAccountId, setDepositAccountId] = useState<string>("");
   const [depositingDay, setDepositingDay] = useState<string>("");
   const [drilldownDay, setDrilldownDay] = useState<string>("");
+  const [depositDialog, setDepositDialog] = useState<{ salesDate: string; amount: number; accountId: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -132,7 +131,6 @@ export default function SalesReportPage() {
         if (cancelled) return;
         setCashAccounts(json.accounts ?? []);
         setCashTx(json.transactions ?? []);
-        setDepositAccountId((prev) => (prev && (json.accounts ?? []).some((a) => a.id === prev) ? prev : (json.accounts ?? [])[0]?.id ?? ""));
       } catch {
         // ignore
       }
@@ -342,23 +340,52 @@ export default function SalesReportPage() {
   }, [drilldownDay, rows, deliveryFeeOthersItems, daily]);
 
   const depositedBySalesDay = useMemo(() => {
-    const set = new Set<string>();
+    const map = new Map<string, CashTransaction>();
     for (const t of cashTx) {
-      if (t.kind === "sales_deposit" && t.salesDate && t.accountId === depositAccountId) set.add(t.salesDate);
+      if (t.kind === "sales_deposit" && t.salesDate && !map.has(t.salesDate)) map.set(t.salesDate, t);
     }
-    return set;
-  }, [cashTx, depositAccountId]);
+    return map;
+  }, [cashTx]);
 
-  const depositSalesDay = async (salesDate: string, amount: number) => {
-    if (!depositAccountId || !salesDate || amount <= 0) return;
+  const accountLabel = (accountId: string): string => {
+    const a = cashAccounts.find((x) => x.id === accountId);
+    return a ? `${a.name} (${a.bank})` : "Unknown bank";
+  };
+
+  const dailyTotal = (d: DailyRow): number =>
+    d.packageAmount + d.subscriptionAmount + d.repurchaseTotal + d.deliveryFee + d.deliveryFeeOthers;
+
+  const depositSalesDay = async (salesDate: string, amount: number, accountId: string) => {
+    if (!accountId || !salesDate || amount <= 0) return;
     setDepositingDay(salesDate);
     setError(null);
     try {
-      const action = depositedBySalesDay.has(salesDate) ? "undoDepositSalesDay" : "depositSalesDay";
       const res = await fetch("/api/admin/cash", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, accountId: depositAccountId, salesDate, amount }),
+        body: JSON.stringify({ action: "depositSalesDay", accountId, salesDate, amount }),
+      });
+      const json = (await res.json()) as { ok?: boolean; file?: { accounts?: BankAccount[]; transactions?: CashTransaction[] }; error?: string };
+      if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
+      setCashAccounts(json.file?.accounts ?? cashAccounts);
+      setCashTx(json.file?.transactions ?? cashTx);
+      setDepositDialog(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDepositingDay("");
+    }
+  };
+
+  const undoDepositSalesDay = async (tx: CashTransaction) => {
+    if (!tx.salesDate || !tx.accountId) return;
+    setDepositingDay(tx.salesDate);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/cash", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "undoDepositSalesDay", accountId: tx.accountId, salesDate: tx.salesDate }),
       });
       const json = (await res.json()) as { ok?: boolean; file?: { accounts?: BankAccount[]; transactions?: CashTransaction[] }; error?: string };
       if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
@@ -620,22 +647,8 @@ export default function SalesReportPage() {
         <div className="mt-6 border-t border-white/10 pt-5">
           <div className="text-sm font-semibold">Deposits</div>
           <div className="mt-1 text-xs text-zinc-400">
-            Mark a sales day as deposited to create an SOA credit in Cash Balances (description: <span className="font-mono">sales-YYYY-MM-DD</span>).
-          </div>
-          <div className="mt-3">
-            <div className="text-xs font-semibold text-zinc-400">Deposit to</div>
-            <select
-              value={depositAccountId}
-              onChange={(e) => setDepositAccountId(e.target.value)}
-              className="admin-select mt-1 w-full"
-            >
-              {cashAccounts.length === 0 ? <option value="">No bank accounts</option> : null}
-              {cashAccounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name} ({a.bank})
-                </option>
-              ))}
-            </select>
+            Mark a sales day as deposited to create an SOA credit in Cash Balances (description:{" "}
+            <span className="font-mono">sales-YYYY-MM-DD</span>). The amount includes Delivery fee (Others).
           </div>
 
           <div className="mt-4 max-h-80 overflow-auto rounded-xl border border-white/10 bg-black/20">
@@ -644,36 +657,43 @@ export default function SalesReportPage() {
                 <tr>
                   <th className="px-3 py-2 text-left">Sales day</th>
                   <th className="px-3 py-2 text-right">Amount</th>
+                  <th className="px-3 py-2 text-left">Bank</th>
                   <th className="px-3 py-2 text-right">Deposit</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10">
                 {daily.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-3 text-zinc-500" colSpan={3}>
+                    <td className="px-3 py-3 text-zinc-500" colSpan={4}>
                       No days.
                     </td>
                   </tr>
                 ) : (
                   daily.map((d) => {
-                    const amt = d.packageAmount + d.subscriptionAmount + d.repurchaseTotal + d.deliveryFee;
-                    const deposited = depositedBySalesDay.has(d.date);
+                    const amt = dailyTotal(d);
+                    const deposited = depositedBySalesDay.get(d.date);
                     return (
                       <tr key={`dep-${d.date}`} className="bg-black/10 text-zinc-100">
                         <td className="px-3 py-2 font-mono text-zinc-200">{d.date}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{currency(amt)}</td>
+                        <td className="px-3 py-2 text-zinc-300">
+                          {deposited ? accountLabel(deposited.accountId) : "—"}
+                        </td>
                         <td className="px-3 py-2 text-right">
                           <button
                             type="button"
-                            disabled={!depositAccountId || amt <= 0 || depositingDay === d.date}
-                            onClick={() => void depositSalesDay(d.date, amt)}
+                            disabled={amt <= 0 || depositingDay === d.date || (!deposited && cashAccounts.length === 0)}
+                            onClick={() => {
+                              if (deposited) void undoDepositSalesDay(deposited);
+                              else setDepositDialog({ salesDate: d.date, amount: amt, accountId: cashAccounts[0]?.id ?? "" });
+                            }}
                             className={[
                               "rounded-xl px-3 py-1.5 text-xs font-semibold disabled:opacity-60",
                               deposited ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15" : "border border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15",
                             ].join(" ")}
-                            title={deposited ? "Click to undo deposit" : "Click to mark deposited"}
+                            title={deposited ? "Click to undo deposit" : "Choose bank and confirm deposit"}
                           >
-                            {depositingDay === d.date ? "Saving…" : deposited ? "Deposited" : "Deposit"}
+                            {depositingDay === d.date ? "Saving…" : deposited ? "Undo" : "Deposit"}
                           </button>
                         </td>
                       </tr>
@@ -685,6 +705,69 @@ export default function SalesReportPage() {
           </div>
         </div>
       </div>
+      {depositDialog ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-4 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-white">Confirm Sales Deposit</div>
+                <div className="admin-muted mt-1 text-xs">
+                  {depositDialog.salesDate} • {currency(depositDialog.amount)}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="admin-btn-secondary px-3 py-1.5 text-xs"
+                onClick={() => setDepositDialog(null)}
+                disabled={depositingDay === depositDialog.salesDate}
+              >
+                Close
+              </button>
+            </div>
+
+            <label className="mt-4 block text-xs font-semibold text-zinc-400">
+              Deposit to bank
+              <select
+                value={depositDialog.accountId}
+                onChange={(e) => setDepositDialog((p) => (p ? { ...p, accountId: e.target.value } : p))}
+                className="admin-select mt-1 w-full"
+                disabled={depositingDay === depositDialog.salesDate}
+              >
+                {cashAccounts.length === 0 ? <option value="">No bank accounts</option> : null}
+                {cashAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.bank})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-zinc-300">
+              This will add a Cash Balances credit with description{" "}
+              <span className="font-mono text-zinc-100">sales-{depositDialog.salesDate}</span>.
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="admin-btn-secondary"
+                onClick={() => setDepositDialog(null)}
+                disabled={depositingDay === depositDialog.salesDate}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="admin-btn-primary"
+                disabled={!depositDialog.accountId || depositingDay === depositDialog.salesDate}
+                onClick={() => void depositSalesDay(depositDialog.salesDate, depositDialog.amount, depositDialog.accountId)}
+              >
+                {depositingDay === depositDialog.salesDate ? "Depositing…" : "Confirm deposit"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
