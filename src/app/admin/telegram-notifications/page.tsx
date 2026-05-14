@@ -46,6 +46,8 @@ export default function TelegramNotificationsPage() {
   const [bots, setBots] = useState<BotDraft[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [testingBotId, setTestingBotId] = useState("");
+  const [testMessages, setTestMessages] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -90,6 +92,32 @@ export default function TelegramNotificationsPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const sendTest = async (bot: BotDraft) => {
+    setTestingBotId(bot.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/admin/telegram/settings?action=test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bot,
+          message: testMessages[bot.id] || "Test message from Seacrest Admin Telegram Notifications.",
+        }),
+      });
+      const json = await readJson<{ ok?: boolean; sent?: number; failed?: Array<{ label?: string; chatId?: string; error?: string }>; error?: string }>(res);
+      if (!res.ok || !json.ok) {
+        const failed = json.failed?.map((f) => `${f.label || f.chatId || "Chat"}: ${f.error}`).join("; ");
+        throw new Error(json.error || failed || `Failed (${res.status})`);
+      }
+      setNotice(`Test message sent to ${json.sent ?? 0} chat(s) for ${bot.name}.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTestingBotId("");
     }
   };
 
@@ -310,6 +338,29 @@ export default function TelegramNotificationsPage() {
                   ))}
                   {bot.schedules.length === 0 ? <div className="text-xs text-zinc-500">No send times added.</div> : null}
                 </div>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-3">
+              <div className="text-xs font-semibold text-emerald-100">Test this bot</div>
+              <div className="mt-1 text-[11px] text-zinc-400">
+                Sends now to all enabled chats above. Use this before relying on the schedule.
+              </div>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <input
+                  value={testMessages[bot.id] ?? ""}
+                  onChange={(e) => setTestMessages((p) => ({ ...p, [bot.id]: e.target.value }))}
+                  className="admin-input min-w-0 flex-1"
+                  placeholder="Type a test message (optional)"
+                />
+                <button
+                  type="button"
+                  onClick={() => void sendTest(bot)}
+                  disabled={testingBotId === bot.id}
+                  className="rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-500/25 disabled:opacity-60"
+                >
+                  {testingBotId === bot.id ? "Sending…" : "Send test"}
+                </button>
               </div>
             </div>
           </div>

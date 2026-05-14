@@ -133,6 +133,23 @@ function withStarterIfEmpty(settings: TelegramNotificationSettings): TelegramNot
   return starterSettings();
 }
 
+async function sendTelegram(token: string, chatId: string, text: string): Promise<void> {
+  if (!token.trim()) throw new Error("Missing bot token.");
+  const res = await fetch(`https://api.telegram.org/bot${token.trim()}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text,
+      disable_web_page_preview: true,
+    }),
+  });
+  const json = (await res.json().catch(() => null)) as { ok?: boolean; description?: string } | null;
+  if (!res.ok || !json?.ok) {
+    throw new Error(json?.description || `Telegram send failed (${res.status}).`);
+  }
+}
+
 export async function GET(req: Request) {
   const auth = await requireSuperadmin(req);
   if (auth instanceof NextResponse) return auth;
@@ -142,7 +159,46 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const auth = await requireSuperadmin(req);
   if (auth instanceof NextResponse) return auth;
-  const body = (await req.json()) as { bots?: unknown };
+  const url = new URL(req.url);
+  const action = url.searchParams.get("action")?.trim() ?? "";
+  const body = (await req.json()) as { bots?: unknown; bot?: unknown; message?: unknown };
+
+  if (action === "test") {
+    if (typeof body.bot !== "object" || body.bot === null) {
+      return NextResponse.json({ error: "Missing `bot`." }, { status: 400 });
+    }
+    const raw = body.bot as Record<string, unknown>;
+    const id = typeof raw.id === "string" ? raw.id.trim() : "";
+    const saved = withStarterIfEmpty(loadTelegramNotificationSettings()).bots.find((b) => b.id === id);
+    const tokenInput = typeof raw.token === "string" ? raw.token.trim() : "";
+    const token = tokenInput || saved?.token || "";
+    const recipients = sanitizeRecipients(raw.recipients).filter((r) => r.enabled && r.chatId.trim());
+    const message =
+      typeof body.message === "string" && body.message.trim()
+        ? body.message.trim()
+        : "Test message from Seacrest Admin Telegram Notifications.";
+
+    if (!token) return NextResponse.json({ error: "Missing bot token." }, { status: 400 });
+    if (recipients.length === 0) {
+      return NextResponse.json({ error: "Add at least one enabled chat recipient." }, { status: 400 });
+    }
+
+    const results = await Promise.allSettled(recipients.map((r) => sendTelegram(token, r.chatId, message)));
+    const failed = results
+      .map((result, i) => ({ result, recipient: recipients[i]! }))
+      .filter((r): r is { result: PromiseRejectedResult; recipient: TelegramRecipientConfig } => r.result.status === "rejected")
+      .map((r) => ({
+        label: r.recipient.label,
+        chatId: r.recipient.chatId,
+        error: r.result.reason instanceof Error ? r.result.reason.message : String(r.result.reason),
+      }));
+
+    if (failed.length > 0) {
+      return NextResponse.json({ ok: false, sent: recipients.length - failed.length, failed }, { status: 502 });
+    }
+    return NextResponse.json({ ok: true, sent: recipients.length });
+  }
+
   if (!Array.isArray(body.bots)) {
     return NextResponse.json({ error: "Missing `bots`." }, { status: 400 });
   }
