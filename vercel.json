@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/admin/telegram/calendar-due",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/admin/telegram/calendar-due",
+      "schedule": "0 9 * * *"
+    }
+  ]
+}
