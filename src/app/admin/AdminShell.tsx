@@ -64,6 +64,28 @@ export default function AdminShell({ children }: { children: ReactNode }) {
     }
   }, [loading, needsSetup, account, pathname, router]);
 
+  useEffect(() => {
+    if (!account?.isSuperadmin || isAuthPath(pathname)) return;
+    let stopped = false;
+
+    const runTelegramHeartbeat = async () => {
+      if (stopped || document.visibilityState === "hidden") return;
+      try {
+        await fetch("/api/admin/telegram/calendar-due?source=browser-heartbeat", { cache: "no-store" });
+      } catch {
+        // Keep this silent; the server cron remains the primary scheduled trigger.
+      }
+    };
+
+    const first = window.setTimeout(() => void runTelegramHeartbeat(), 5000);
+    const interval = window.setInterval(() => void runTelegramHeartbeat(), 60_000);
+    return () => {
+      stopped = true;
+      window.clearTimeout(first);
+      window.clearInterval(interval);
+    };
+  }, [account?.isSuperadmin, pathname]);
+
   if (isAuthPath(pathname)) {
     return (
       <div className="min-h-screen bg-zinc-950 text-zinc-100 antialiased selection:bg-emerald-500/25 selection:text-emerald-50">
