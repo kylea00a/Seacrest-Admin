@@ -66,6 +66,7 @@ export function adminPathToPermissionKey(pathname: string): AdminPermissionKey |
     "jnt-import": "delivery",
     settings: "settings",
     "packages-products": "packagesProducts",
+    "telegram-notifications": "settings",
   };
   return map[seg] ?? null;
 }

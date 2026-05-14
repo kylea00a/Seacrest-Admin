@@ -19,6 +19,8 @@ import type {
   ShippingCourier,
   BookingStatusRecord,
   DeliveryFeeCharge,
+  TelegramNotificationSettings,
+  TelegramSendLogEntry,
 } from "./types";
 
 const PROJECT_ROOT = process.cwd();
@@ -41,6 +43,8 @@ const REMINDERS_FILE = path.join(ADMIN_DATA_DIR, "reminders.json");
 const SHIPPING_COURIERS_FILE = path.join(ADMIN_DATA_DIR, "shippingCouriers.json");
 const BOOKING_STATUS_FILE = path.join(ADMIN_DATA_DIR, "bookingStatus.json");
 const DELIVERY_FEE_CHARGES_FILE = path.join(ADMIN_DATA_DIR, "deliveryFeeCharges.json");
+const TELEGRAM_SETTINGS_FILE = path.join(ADMIN_DATA_DIR, "telegramNotifications.json");
+const TELEGRAM_SEND_LOG_FILE = path.join(ADMIN_DATA_DIR, "telegramSendLog.json");
 
 function ensureAdminDir() {
   if (!fs.existsSync(ADMIN_DATA_DIR)) fs.mkdirSync(ADMIN_DATA_DIR, { recursive: true });
@@ -84,6 +88,25 @@ export function loadReminders(): Reminder[] {
 
 export function saveReminders(reminders: Reminder[]) {
   writeJsonFile(REMINDERS_FILE, reminders);
+}
+
+export function loadTelegramNotificationSettings(): TelegramNotificationSettings {
+  return readJsonFile<TelegramNotificationSettings>(TELEGRAM_SETTINGS_FILE, {
+    bots: [],
+    updatedAt: new Date(0).toISOString(),
+  });
+}
+
+export function saveTelegramNotificationSettings(settings: TelegramNotificationSettings) {
+  writeJsonFile(TELEGRAM_SETTINGS_FILE, settings);
+}
+
+export function loadTelegramSendLog(): TelegramSendLogEntry[] {
+  return readJsonFile<TelegramSendLogEntry[]>(TELEGRAM_SEND_LOG_FILE, []);
+}
+
+export function saveTelegramSendLog(entries: TelegramSendLogEntry[]) {
+  writeJsonFile(TELEGRAM_SEND_LOG_FILE, entries);
 }
 
 export function loadShippingCouriers(): ShippingCourier[] {

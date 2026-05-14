@@ -69,6 +69,44 @@ export interface CalendarEvent {
   kind?: "bill" | "reminder" | "pettyCash";
 }
 
+export type TelegramNotificationKind = "calendarReminders" | "calendarExpenses";
+
+export interface TelegramRecipientConfig {
+  id: string;
+  label: string;
+  chatId: string;
+  enabled: boolean;
+}
+
+export interface TelegramScheduleConfig {
+  id: string;
+  /** HH:mm in Asia/Manila */
+  time: string;
+  enabled: boolean;
+}
+
+export interface TelegramBotConfig {
+  id: string;
+  name: string;
+  token: string;
+  enabled: boolean;
+  recipients: TelegramRecipientConfig[];
+  schedules: TelegramScheduleConfig[];
+  sendKinds: Record<TelegramNotificationKind, boolean>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TelegramNotificationSettings {
+  bots: TelegramBotConfig[];
+  updatedAt: string;
+}
+
+export interface TelegramSendLogEntry {
+  key: string;
+  sentAt: string;
+}
+
 export interface Reminder {
   id: string;
   title: string;

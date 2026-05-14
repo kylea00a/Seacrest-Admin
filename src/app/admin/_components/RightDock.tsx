@@ -73,6 +73,12 @@ const ALL_SECTIONS: DockSection[] = [
         href: "/admin/packages-products",
         perm: "packagesProducts",
       },
+      {
+        key: "telegram-notifications",
+        label: "Telegram Notifications",
+        href: "/admin/telegram-notifications",
+        superadminOnly: true,
+      },
     ],
   },
   {
