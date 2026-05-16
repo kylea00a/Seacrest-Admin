@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { readOrdersDay, saveOrdersDay, upsertOrdersIndex } from "@/data/admin/orders";
+import { rebuildOrdersSearchIndexForDatesSync } from "@/data/admin/ordersSearchIndex";
 import { computeAggregatesFromRows, type ParsedOrderRow } from "@/data/admin/ordersParse";
 import { productNamesFromSettings } from "@/data/admin/productSettings";
 import { loadAdminSettings } from "@/data/admin/storage";
@@ -127,6 +128,7 @@ export async function POST(req: Request) {
 
   saveOrdersDay(date, { summary, sheetName: "manual", parsed: dayParsed, manualId: randomUUID() });
   upsertOrdersIndex(summary);
+  rebuildOrdersSearchIndexForDatesSync([date]);
 
   return NextResponse.json({ ok: true, summary, row });
 }

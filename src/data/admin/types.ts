@@ -281,6 +281,18 @@ export interface InventoryFlowDayRow {
   updatedAt: string; // ISO
 }
 
+/** Compact row for instant All Orders search (all dates). */
+export interface OrdersSearchIndexEntry {
+  invoice: string;
+  sourceDate: string;
+  effectiveDate: string;
+  distributorName: string;
+  ordererName: string;
+  shippingFullName: string;
+  /** Lowercase normalized invoice + names for substring search. */
+  searchBlob: string;
+}
+
 /** Staff-encoded ending inventory snapshot for a calendar day (YYYY-MM-DD). */
 export interface InventoryEndingSnapshot {
   date: string;

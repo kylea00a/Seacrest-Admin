@@ -17,7 +17,17 @@ import {
 } from "@/data/admin/orderClaim";
 import type { OrderClaimRecord } from "@/data/admin/types";
 import { useAdminSession } from "../AdminSessionContext";
-import { orderInvoiceMatchesSearch } from "@/lib/orderSearchMatch";
+import { orderMatchesSearch } from "@/lib/orderSearchMatch";
+
+type SearchIndexEntry = {
+  invoice: string;
+  sourceDate: string;
+  effectiveDate: string;
+  distributorName: string;
+  ordererName: string;
+  shippingFullName: string;
+  searchBlob: string;
+};
 
 async function safeReadJson<T>(res: Response): Promise<T> {
   const text = await res.text();
@@ -392,6 +402,9 @@ export default function OrdersPage() {
   const [statusFilter, setStatusFilter] = useState<"All" | "Paid" | "Pending" | "Processing" | "Cancelled">("All");
   const [deliveryMethodFilter, setDeliveryMethodFilter] = useState<"All" | "Pickup" | "Delivery">("All");
   const [search, setSearch] = useState("");
+  const [searchIndex, setSearchIndex] = useState<SearchIndexEntry[]>([]);
+  const [searchIndexReady, setSearchIndexReady] = useState(false);
+  const [hydratingSearch, setHydratingSearch] = useState(false);
   const [pkgProductsOpen, setPkgProductsOpen] = useState(false);
   const [subProductsOpen, setSubProductsOpen] = useState(false);
   const [repProductsOpen, setRepProductsOpen] = useState(false);
@@ -441,6 +454,27 @@ export default function OrdersPage() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSearchIndex() {
+      try {
+        const res = await fetch("/api/admin/orders/search-index", { cache: "no-store" });
+        const json = await safeReadJson<{ entries?: SearchIndexEntry[]; error?: string }>(res);
+        if (!res.ok) throw new Error(json.error ?? `Search index failed (${res.status})`);
+        if (!cancelled) {
+          setSearchIndex(json.entries ?? []);
+          setSearchIndexReady(true);
+        }
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      }
+    }
+    void loadSearchIndex();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const refetchCompiledRows = useCallback(async () => {
     if (!index.length) {
       setRows([]);
@@ -475,14 +509,28 @@ export default function OrdersPage() {
     }
   }, [index.length, startDate, endDate]);
 
-  const refetchSearchRows = useCallback(async () => {
+  const hydrateSearchRows = useCallback(async () => {
     const q = search.trim();
-    if (!q) return;
-    setLoading(true);
+    if (!q || !searchIndexReady) return;
+    const keys = searchIndex
+      .filter((e) => orderMatchesSearch(q, e.searchBlob))
+      .slice(0, 1500)
+      .map((e) => ({ invoice: e.invoice, sourceDate: e.sourceDate }));
+
+    setHydratingSearch(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ q, limit: "1500", maxMs: "12000" });
-      const res = await fetch(`/api/admin/orders/search?${qs.toString()}`, { cache: "no-store" });
+      if (keys.length === 0) {
+        setRows([]);
+        setClaims({});
+        return;
+      }
+      const res = await fetch("/api/admin/orders/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keys }),
+        cache: "no-store",
+      });
       const json = await safeReadJson<{
         rows?: Array<ParsedRow & { date: string }>;
         claims?: Record<string, OrderClaimRecord>;
@@ -494,18 +542,30 @@ export default function OrdersPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      setHydratingSearch(false);
     }
-  }, [search]);
+  }, [search, searchIndex, searchIndexReady]);
 
   useEffect(() => {
     const q = search.trim();
+    if (!q) {
+      void refetchCompiledRows();
+      return;
+    }
+    if (!searchIndexReady) return;
     const t = window.setTimeout(() => {
-      if (q) void refetchSearchRows();
-      else void refetchCompiledRows();
-    }, 250);
+      void hydrateSearchRows();
+    }, 80);
     return () => window.clearTimeout(t);
-  }, [refetchCompiledRows, refetchSearchRows, search]);
+  }, [search, searchIndexReady, refetchCompiledRows, hydrateSearchRows]);
+
+  const searchMatchCount = useMemo(() => {
+    const q = search.trim();
+    if (!q || !searchIndexReady) return null;
+    return searchIndex.filter((e) => orderMatchesSearch(q, e.searchBlob)).length;
+  }, [search, searchIndex, searchIndexReady]);
+
+  const isSearchMode = Boolean(search.trim());
 
   const resetClaimDatesApr10 = async () => {
     if (!isSuperadmin || !canFullOrderEdit) return;
@@ -604,7 +664,7 @@ export default function OrdersPage() {
       });
       const json = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
-      if (search.trim()) await refetchSearchRows();
+      if (search.trim()) await hydrateSearchRows();
       else await refetchCompiledRows();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -702,7 +762,7 @@ export default function OrdersPage() {
       if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
       setAddOpen(false);
       // Reload current view.
-      if (search.trim()) void refetchSearchRows();
+      if (search.trim()) void hydrateSearchRows();
       else void refetchCompiledRows();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -833,7 +893,7 @@ export default function OrdersPage() {
       setBulkSelected({});
       setBulkSelectedRows({});
       // Reload current view.
-      if (search.trim()) void refetchSearchRows();
+      if (search.trim()) void hydrateSearchRows();
       else void refetchCompiledRows();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -928,7 +988,7 @@ export default function OrdersPage() {
         delete next[invoiceNumber];
         return next;
       });
-      if (search.trim()) await refetchSearchRows();
+      if (search.trim()) await hydrateSearchRows();
       else await refetchCompiledRows();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -962,11 +1022,9 @@ export default function OrdersPage() {
             : isNonPickupDelivery(dm);
       if (!matchesDeliveryMethod) return false;
 
-      if (!search.trim()) return true;
-
-      return orderInvoiceMatchesSearch(search, r.invoiceNumber);
+      return true;
     });
-  }, [rows, statusFilter, deliveryMethodFilter, search]);
+  }, [rows, statusFilter, deliveryMethodFilter]);
 
   const tableTotalPages = useMemo(
     () => Math.max(1, Math.ceil(filteredRows.length / rowsPerPage)),
@@ -992,9 +1050,9 @@ export default function OrdersPage() {
         <div>
           <h1 className="admin-title">All Orders (Detailed)</h1>
           <div className="admin-muted">
-            Compiled from confirmed uploads. Search uses{" "}
-            <span className="text-zinc-300">invoice number only</span> (matches all dates on disk, including past). Leave
-            search empty to use the date range below.
+            Compiled from confirmed uploads. Search matches{" "}
+            <span className="text-zinc-300">invoice or name</span> across all dates instantly. Leave search empty to use
+            the date range below.
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -1055,7 +1113,7 @@ export default function OrdersPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="mt-1 w-64 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-emerald-500/60"
-              placeholder="Invoice # (e.g. INV-53422025050100001)"
+              placeholder="Invoice or name…"
             />
           </div>
           <div>
@@ -1065,13 +1123,22 @@ export default function OrdersPage() {
             </div>
           </div>
           <div className="text-xs text-zinc-400">
-            Loaded: <span className="font-semibold text-zinc-200">{rows.length}</span>
-            {filteredRows.length !== rows.length ? (
+            {isSearchMode && searchMatchCount != null ? (
               <>
-                {" "}
-                • Filtered: <span className="font-semibold text-zinc-200">{filteredRows.length}</span>
+                Matches: <span className="font-semibold text-zinc-200">{searchMatchCount}</span>
+                {hydratingSearch ? <span className="ml-2 text-zinc-500">(loading details…)</span> : null}
               </>
-            ) : null}
+            ) : (
+              <>
+                Loaded: <span className="font-semibold text-zinc-200">{rows.length}</span>
+                {filteredRows.length !== rows.length ? (
+                  <>
+                    {" "}
+                    • Filtered: <span className="font-semibold text-zinc-200">{filteredRows.length}</span>
+                  </>
+                ) : null}
+              </>
+            )}
           </div>
         {isSuperadmin && canFullOrderEdit ? (
           <button
@@ -1087,7 +1154,11 @@ export default function OrdersPage() {
         </div>
       </div>
 
-      {loading ? <div className="mt-4 text-sm text-zinc-300">Loading…</div> : null}
+      {loading || (isSearchMode && !searchIndexReady) || (isSearchMode && hydratingSearch && rows.length === 0) ? (
+        <div className="mt-4 text-sm text-zinc-300">
+          {isSearchMode && !searchIndexReady ? "Preparing search index…" : "Loading…"}
+        </div>
+      ) : null}
       {error ? (
         <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
           {error}

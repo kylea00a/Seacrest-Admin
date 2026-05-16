@@ -13,6 +13,7 @@ import type {
   InventorySupplyEntry,
   OrderClaimRecord,
   OrdersImportSummary,
+  OrdersSearchIndexEntry,
   PettyCashRequest,
   PettyCashState,
   PettyCashLedgerTransaction,
@@ -34,6 +35,7 @@ const PETTY_CASH_REQUESTS_FILE = path.join(ADMIN_DATA_DIR, "pettyCashRequests.js
 const PETTY_CASH_LEDGER_FILE = path.join(ADMIN_DATA_DIR, "pettyCashLedger.json");
 const SETTINGS_FILE = path.join(ADMIN_DATA_DIR, "settings.json");
 const ORDERS_INDEX_FILE = path.join(ADMIN_DATA_DIR, "ordersIndex.json");
+const ORDERS_SEARCH_INDEX_FILE = path.join(ADMIN_DATA_DIR, "ordersSearchIndex.json");
 const DELIVERY_TRACKING_FILE = path.join(ADMIN_DATA_DIR, "deliveryTracking.json");
 const ORDER_ADJUSTMENTS_FILE = path.join(ADMIN_DATA_DIR, "orderAdjustments.json");
 const ORDER_CLAIMS_FILE = path.join(ADMIN_DATA_DIR, "orderClaims.json");
@@ -292,6 +294,29 @@ export function loadOrdersIndex(): OrdersImportSummary[] {
 
 export function saveOrdersIndex(index: OrdersImportSummary[]) {
   writeJsonFile(ORDERS_INDEX_FILE, index);
+}
+
+export type OrdersSearchIndexFile = {
+  builtAt: string;
+  entries: OrdersSearchIndexEntry[];
+};
+
+export function loadOrdersSearchIndex(): OrdersSearchIndexFile {
+  const raw = readJsonFile<unknown>(ORDERS_SEARCH_INDEX_FILE, { builtAt: "", entries: [] });
+  if (raw && typeof raw === "object") {
+    const r = raw as OrdersSearchIndexFile;
+    if (Array.isArray(r.entries)) {
+      return {
+        builtAt: typeof r.builtAt === "string" ? r.builtAt : "",
+        entries: r.entries,
+      };
+    }
+  }
+  return { builtAt: "", entries: [] };
+}
+
+export function saveOrdersSearchIndex(data: OrdersSearchIndexFile) {
+  writeJsonFile(ORDERS_SEARCH_INDEX_FILE, data);
 }
 
 export type DeliveryTrackingMap = Record<string, { trackingNumber: string; savedAt: string }>;

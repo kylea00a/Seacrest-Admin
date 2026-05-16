@@ -1,29 +1,13 @@
 import { NextResponse } from "next/server";
-import { mergeOrderRowWithAdjustment } from "@/data/admin/orderAdjustmentMerge";
-import { resolvePackageNameFromPrice } from "@/data/admin/packageResolve";
-import { mergeIndexAndDiskOrderDates, readOrdersDayAsync } from "@/data/admin/orders";
-import { loadAdminSettings, loadOrderAdjustments, loadOrderClaims, loadOrdersIndex } from "@/data/admin/storage";
-import { orderInvoiceMatchesSearch, stringifySearchField } from "@/lib/orderSearchMatch";
+import { hydrateOrdersFromIndexMatches } from "@/data/admin/ordersSearchHydrate";
+import { rebuildOrdersSearchIndexAll } from "@/data/admin/ordersSearchIndex";
+import { loadOrderClaims, loadOrdersSearchIndex } from "@/data/admin/storage";
+import type { OrdersSearchIndexEntry } from "@/data/admin/types";
+import { orderMatchesSearch } from "@/lib/orderSearchMatch";
 import { requireApiAnyPermission } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-function parsePrice(v: unknown): number {
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string") {
-    const n = Number(v.replace(/,/g, ""));
-    return Number.isFinite(n) ? n : 0;
-  }
-  return 0;
-}
-
-function priceFromPackageCode(packageName: string): number {
-  const m = packageName.match(/-P(\d+(?:\.\d+)?)/i) ?? packageName.match(/\bP(\d+(?:\.\d+)?)\b/i);
-  if (!m) return 0;
-  const n = Number(m[1]);
-  return Number.isFinite(n) ? n : 0;
-}
 
 export async function GET(req: Request) {
   const auth = await requireApiAnyPermission(req, ["orders", "ordersFullEdit"]);
@@ -31,96 +15,66 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const qRaw = (url.searchParams.get("q") ?? "").trim();
-  const q = qRaw.toLowerCase();
-  if (!q) return NextResponse.json({ rows: [], count: 0, q: qRaw, claims: loadOrderClaims() });
-
-  const limit = Math.min(2000, Math.max(1, Number(url.searchParams.get("limit") ?? 500) || 500));
-
-  const index = loadOrdersIndex();
-  const adjustments = loadOrderAdjustments();
-  const claims = loadOrderClaims();
-  const packages = loadAdminSettings().packages;
-
-  const rows: Array<Record<string, unknown>> = [];
-
-  const startedAt = Date.now();
-  const maxMs = Math.min(15000, Math.max(800, Number(url.searchParams.get("maxMs") ?? 10000) || 10000));
-  let scannedDays = 0;
-  /** Include every on-disk order day — index alone can omit older imports. */
-  const dates = mergeIndexAndDiskOrderDates(index.map((i) => i.date));
-
-  const batchSize = 16;
-  outer: for (let bi = 0; bi < dates.length; bi += batchSize) {
-    if (rows.length >= limit) break outer;
-    if (Date.now() - startedAt > maxMs) break outer;
-
-    const batch = dates.slice(bi, bi + batchSize);
-    scannedDays += batch.length;
-    const dayPayloads = await Promise.all(batch.map((d) => readOrdersDayAsync(d)));
-
-    for (let j = 0; j < batch.length; j++) {
-      if (rows.length >= limit) break outer;
-      if (Date.now() - startedAt > maxMs) break outer;
-
-      const sourceDate = batch[j]!;
-      const dayUnknown = dayPayloads[j];
-      const day =
-        typeof dayUnknown === "object" && dayUnknown !== null
-          ? (dayUnknown as Record<string, unknown>)
-          : null;
-      const parsed =
-        day && typeof day["parsed"] === "object" && day["parsed"] !== null
-          ? (day["parsed"] as Record<string, unknown>)
-          : null;
-      const parsedRows = parsed?.["rows"];
-      if (!Array.isArray(parsedRows)) continue;
-
-      for (const r of parsedRows) {
-        if (rows.length >= limit) break outer;
-        if (typeof r !== "object" || r === null) continue;
-        const rec = r as Record<string, unknown>;
-
-        const invoiceKey = stringifySearchField(rec["invoiceNumber"]);
-        const adj = invoiceKey ? adjustments[invoiceKey] : undefined;
-        const mergedRec = mergeOrderRowWithAdjustment(rec as Record<string, unknown>, adj);
-        const effectiveDate = adj?.effectiveDate ?? sourceDate;
-
-        if (!orderInvoiceMatchesSearch(qRaw, mergedRec["invoiceNumber"])) {
-          continue;
-        }
-
-        const packageNameRaw =
-          typeof mergedRec["packageName"] === "string" ? (mergedRec["packageName"] as string).trim() : "";
-        const pkgPriceFromRow = parsePrice(mergedRec["packagePrice"]);
-        const pkgPriceFromCode = priceFromPackageCode(packageNameRaw);
-        const packagePrice = pkgPriceFromRow || pkgPriceFromCode;
-        const resolvedPackageName = resolvePackageNameFromPrice(packagePrice, packages);
-        const packageName = resolvedPackageName || packageNameRaw;
-
-        rows.push({
-          ...mergedRec,
-          packagePrice,
-          packageName,
-          date: effectiveDate,
-          sourceDate,
-          status: adj?.status ?? (typeof mergedRec["status"] === "string" ? (mergedRec["status"] as string) : ""),
-          adjusted: !!adj,
-        });
-      }
-    }
+  if (!qRaw) {
+    return NextResponse.json({ rows: [], count: 0, q: qRaw, claims: loadOrderClaims() });
   }
 
-  rows.sort((a, b) => {
-    const da = String(a["date"] ?? "");
-    const db = String(b["date"] ?? "");
-    if (da !== db) return db.localeCompare(da);
-    const ra = Number(a["rowIndex"] ?? 0);
-    const rb = Number(b["rowIndex"] ?? 0);
-    if (ra !== rb) return ra - rb;
-    return String(a["invoiceNumber"] ?? "").localeCompare(String(b["invoiceNumber"] ?? ""));
-  });
+  const limit = Math.min(2000, Math.max(1, Number(url.searchParams.get("limit") ?? 1500) || 1500));
 
-  const partial = scannedDays < dates.length && Date.now() - startedAt >= maxMs;
-  return NextResponse.json({ rows, count: rows.length, q: qRaw, claims, partial, scannedDays });
+  let file = loadOrdersSearchIndex();
+  if (file.entries.length === 0) {
+    await rebuildOrdersSearchIndexAll();
+    file = loadOrdersSearchIndex();
+  }
+
+  const matches: OrdersSearchIndexEntry[] = [];
+  for (const e of file.entries) {
+    if (matches.length >= limit) break;
+    if (orderMatchesSearch(qRaw, e.searchBlob)) matches.push(e);
+  }
+
+  const rows = await hydrateOrdersFromIndexMatches(matches);
+  const claims = loadOrderClaims();
+
+  return NextResponse.json({
+    rows,
+    count: rows.length,
+    q: qRaw,
+    claims,
+    indexSize: file.entries.length,
+    matchCount: matches.length,
+  });
 }
 
+/** Hydrate full rows for a client-filtered list (instant search UI). */
+export async function POST(req: Request) {
+  const auth = await requireApiAnyPermission(req, ["orders", "ordersFullEdit"]);
+  if (auth instanceof NextResponse) return auth;
+
+  const body = (await req.json()) as { keys?: unknown };
+  const keysRaw = body.keys;
+  if (!Array.isArray(keysRaw)) {
+    return NextResponse.json({ error: "Missing `keys` array." }, { status: 400 });
+  }
+
+  const file = loadOrdersSearchIndex();
+  const byInvoice = new Map(file.entries.map((e) => [e.invoice, e]));
+
+  const matches: OrdersSearchIndexEntry[] = [];
+  const seen = new Set<string>();
+  for (const k of keysRaw) {
+    if (matches.length >= 2000) break;
+    if (!k || typeof k !== "object") continue;
+    const inv =
+      typeof (k as Record<string, unknown>)["invoice"] === "string"
+        ? ((k as Record<string, unknown>)["invoice"] as string).trim()
+        : "";
+    if (!inv || seen.has(inv)) continue;
+    seen.add(inv);
+    const entry = byInvoice.get(inv);
+    if (entry) matches.push(entry);
+  }
+
+  const rows = await hydrateOrdersFromIndexMatches(matches);
+  return NextResponse.json({ rows, count: rows.length, claims: loadOrderClaims() });
+}

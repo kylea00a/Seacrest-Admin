@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { buildBulkSummaryForDay, buildDayParsedFromIndices } from "@/data/admin/ordersBulkSplit";
 import type { OrdersDayParsed } from "@/data/admin/ordersParse";
 import { deleteOrdersStaging, readOrdersStaging, saveOrdersDay, upsertOrdersIndex } from "@/data/admin/orders";
+import { rebuildOrdersSearchIndexForDatesSync } from "@/data/admin/ordersSearchIndex";
 import { productNamesFromSettings } from "@/data/admin/productSettings";
 import { loadAdminSettings } from "@/data/admin/storage";
 import type { OrdersImportSummary } from "@/data/admin/types";
@@ -54,6 +55,7 @@ export async function POST(req: Request) {
       summaries.push(summary);
     }
 
+    rebuildOrdersSearchIndexForDatesSync(groups.map((g) => g.date));
     deleteOrdersStaging(token);
     return NextResponse.json({ bulk: true, summaries, count: summaries.length });
   }
@@ -72,6 +74,7 @@ export async function POST(req: Request) {
       : undefined;
   saveOrdersDay(date, { summary, sheetName, parsed });
   upsertOrdersIndex(summary);
+  rebuildOrdersSearchIndexForDatesSync([date]);
   deleteOrdersStaging(token);
 
   return NextResponse.json({ summary });
