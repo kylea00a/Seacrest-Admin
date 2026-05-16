@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/admin/telegram/calendar-due",
-      "schedule": "*/5 * * * *"
+      "schedule": "* * * * *"
     }
   ]
 }

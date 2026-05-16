@@ -1,21 +1,20 @@
 import { NextResponse } from "next/server";
 import { buildCalendarEventsForMonth } from "@/data/admin/calendar";
-import {
-  loadDepartments,
-  loadExpenses,
-  loadReminders,
-  loadTelegramNotificationSettings,
-  loadTelegramSendLog,
-  saveTelegramSendLog,
-} from "@/data/admin/storage";
+import { loadDepartments, loadExpenses, loadReminders } from "@/data/admin/storage";
 import type { CalendarEvent, TelegramBotConfig, TelegramNotificationKind, TelegramNotificationSettings } from "@/data/admin/types";
 import { requireSuperadmin } from "@/lib/adminApiAuth";
+import {
+  loadTelegramSendLogResolved,
+  loadTelegramSettingsResolved,
+  persistTelegramSendLog,
+  settingsDiagnostics,
+} from "@/lib/telegramSettingsLoad";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const MANILA_TIME_ZONE = "Asia/Manila";
-const SCHEDULE_GRACE_MINUTES = 15;
+const SCHEDULE_GRACE_MINUTES = 30;
 
 function manilaTodayYmd(): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -136,46 +135,6 @@ async function sendTelegram(token: string, chatId: string, text: string): Promis
   }
 }
 
-function defaultSettingsFromEnv(): TelegramNotificationSettings {
-  const now = new Date().toISOString();
-  const token = process.env.TELEGRAM_BOT_TOKEN?.trim() ?? "";
-  const chats = (process.env.TELEGRAM_CHAT_IDS || "6409473247,7279390967")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const labels: Record<string, string> = { "6409473247": "Althea", "7279390967": "Jay" };
-  return {
-    updatedAt: now,
-    bots: [
-      {
-        id: "default",
-        name: "Default Telegram Bot",
-        token,
-        enabled: true,
-        recipients: chats.map((chatId) => ({
-          id: chatId,
-          label: labels[chatId] ?? chatId,
-          chatId,
-          enabled: true,
-        })),
-        schedules: [
-          { id: "10am", time: "10:00", enabled: true },
-          { id: "5pm", time: "17:00", enabled: true },
-        ],
-        sendKinds: { calendarReminders: true, calendarExpenses: true },
-        createdAt: now,
-        updatedAt: now,
-      },
-    ],
-  };
-}
-
-function loadSettings(): TelegramNotificationSettings {
-  const saved = loadTelegramNotificationSettings();
-  if (saved.bots.length > 0) return saved;
-  return defaultSettingsFromEnv();
-}
-
 function hmToMinutes(hm: string): number | null {
   const m = hm.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
   if (!m) return null;
@@ -183,6 +142,7 @@ function hmToMinutes(hm: string): number | null {
 }
 
 function isScheduleDue(scheduleTime: string, currentHm: string): boolean {
+  if (scheduleTime === currentHm) return true;
   const sched = hmToMinutes(scheduleTime);
   const current = hmToMinutes(currentHm);
   if (sched == null || current == null) return false;
@@ -195,11 +155,18 @@ function dueBotSchedules(
   hm: string,
   force: boolean,
   runNow: boolean,
+  trigger?: { botId: string; scheduleTime: string },
 ): Array<{ bot: TelegramBotConfig; scheduleTime: string }> {
   const out: Array<{ bot: TelegramBotConfig; scheduleTime: string }> = [];
   for (const bot of settings.bots) {
     if (!bot.enabled || !bot.token?.trim()) continue;
     if (!bot.recipients.some((r) => r.enabled && r.chatId.trim())) continue;
+    if (trigger) {
+      if (bot.id !== trigger.botId) continue;
+      const sched = bot.schedules.find((s) => s.enabled && s.time === trigger.scheduleTime);
+      if (sched) out.push({ bot, scheduleTime: sched.time });
+      continue;
+    }
     if (runNow) {
       out.push({ bot, scheduleTime: hm });
       continue;
@@ -222,6 +189,10 @@ export async function GET(req: Request) {
   const hm = url.searchParams.get("time")?.trim() || manilaNowHm();
   const force = url.searchParams.get("force") === "1";
   const runNow = url.searchParams.get("runNow") === "1";
+  const triggerBotId = url.searchParams.get("botId")?.trim() || "";
+  const triggerSchedule = url.searchParams.get("scheduleTime")?.trim() || "";
+  const trigger =
+    triggerBotId && triggerSchedule ? { botId: triggerBotId, scheduleTime: triggerSchedule } : undefined;
   if (!parseYmd(date)) return NextResponse.json({ error: "Invalid `date` (YYYY-MM-DD)." }, { status: 400 });
 
   const items = dueItemsForDate(date);
@@ -229,8 +200,9 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: true, date, time: hm, sent: 0, skipped: "No pending reminders or expenses." });
   }
 
-  const settings = loadSettings();
-  const due = dueBotSchedules(settings, hm, force, runNow);
+  const settings = await loadTelegramSettingsResolved();
+  const diag = settingsDiagnostics(settings);
+  const due = dueBotSchedules(settings, hm, force, runNow, trigger);
   if (due.length === 0) {
     return NextResponse.json({
       ok: true,
@@ -238,10 +210,11 @@ export async function GET(req: Request) {
       time: hm,
       sent: 0,
       skipped: `No enabled Telegram schedule is due within ${SCHEDULE_GRACE_MINUTES} minutes.`,
+      diagnostics: diag,
     });
   }
 
-  const sentLog = loadTelegramSendLog();
+  const sentLog = await loadTelegramSendLogResolved();
   const sentKeys = new Set(sentLog.map((e) => e.key));
   const tasks: Array<{ key: string; botName: string; scheduleTime: string; chatId: string; promise: Promise<void> }> = [];
   for (const { bot, scheduleTime } of due) {
@@ -275,10 +248,10 @@ export async function GET(req: Request) {
   if (succeeded.length > 0 && !force) {
     const now = new Date().toISOString();
     const nextLog = [
-      ...sentLog.filter((e) => e.sentAt >= new Date(Date.now() - 1000 * 60 * 60 * 24 * 45).toISOString()),
+      ...sentLog,
       ...succeeded.map((t) => ({ key: t.key, sentAt: now })),
     ];
-    saveTelegramSendLog(nextLog);
+    await persistTelegramSendLog(nextLog);
   }
 
   if (failed.length > 0) {

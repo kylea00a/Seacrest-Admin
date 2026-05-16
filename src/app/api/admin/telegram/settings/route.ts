@@ -4,6 +4,8 @@ import {
   loadTelegramNotificationSettings,
   saveTelegramNotificationSettings,
 } from "@/data/admin/storage";
+import { saveTelegramSettingsToShelf } from "@/lib/adminStorageShelf";
+import { loadTelegramSettingsResolved } from "@/lib/telegramSettingsLoad";
 import type {
   TelegramBotConfig,
   TelegramNotificationKind,
@@ -153,7 +155,8 @@ async function sendTelegram(token: string, chatId: string, text: string): Promis
 export async function GET(req: Request) {
   const auth = await requireSuperadmin(req);
   if (auth instanceof NextResponse) return auth;
-  return NextResponse.json({ settings: safeSettings(withStarterIfEmpty(loadTelegramNotificationSettings())) });
+  const settings = await loadTelegramSettingsResolved();
+  return NextResponse.json({ settings: safeSettings(withStarterIfEmpty(settings)) });
 }
 
 export async function POST(req: Request) {
@@ -169,7 +172,7 @@ export async function POST(req: Request) {
     }
     const raw = body.bot as Record<string, unknown>;
     const id = typeof raw.id === "string" ? raw.id.trim() : "";
-    const saved = withStarterIfEmpty(loadTelegramNotificationSettings()).bots.find((b) => b.id === id);
+    const saved = (await loadTelegramSettingsResolved()).bots.find((b) => b.id === id);
     const tokenInput = typeof raw.token === "string" ? raw.token.trim() : "";
     const token = tokenInput || saved?.token || "";
     const recipients = sanitizeRecipients(raw.recipients).filter((r) => r.enabled && r.chatId.trim());
@@ -232,6 +235,7 @@ export async function POST(req: Request) {
 
   const next: TelegramNotificationSettings = { bots, updatedAt: now };
   saveTelegramNotificationSettings(next);
+  await saveTelegramSettingsToShelf(next);
   return NextResponse.json({ ok: true, settings: safeSettings(next) });
 }
 

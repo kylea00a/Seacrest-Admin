@@ -1,7 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { TelegramBotConfig, TelegramNotificationKind } from "@/data/admin/types";
+import {
+  formatCountdown,
+  manilaTodayYmd,
+  nextScheduleTargetMs,
+  scheduleFireKey,
+} from "@/lib/telegramScheduleCountdown";
+import { useTelegramScheduleAutoSend } from "@/lib/useTelegramScheduleAutoSend";
 
 type BotDraft = TelegramBotConfig & {
   hasToken?: boolean;
@@ -40,6 +47,69 @@ async function readJson<T>(res: Response): Promise<T> {
   } catch {
     throw new Error(`Bad response (${res.status})`);
   }
+}
+
+function ScheduleCountdown({
+  botId,
+  botName,
+  scheduleTime,
+  enabled,
+  botEnabled,
+  onFire,
+}: {
+  botId: string;
+  botName: string;
+  scheduleTime: string;
+  enabled: boolean;
+  botEnabled: boolean;
+  onFire: (botId: string, scheduleTime: string, botName: string) => Promise<void>;
+}) {
+  const [label, setLabel] = useState("--:--");
+  const firingRef = useRef(false);
+
+  useEffect(() => {
+    if (!enabled || !botEnabled) {
+      setLabel("—");
+      return;
+    }
+
+    const tick = () => {
+      const msLeft = nextScheduleTargetMs(scheduleTime) - Date.now();
+      setLabel(msLeft <= 0 ? "Sending…" : formatCountdown(msLeft));
+
+      if (msLeft > 1000) {
+        firingRef.current = false;
+        return;
+      }
+      if (firingRef.current) return;
+
+      const key = scheduleFireKey(botId, scheduleTime, manilaTodayYmd());
+      if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(`tg-fired-${key}`)) return;
+
+      firingRef.current = true;
+      if (typeof sessionStorage !== "undefined") sessionStorage.setItem(`tg-fired-${key}`, "1");
+
+      void onFire(botId, scheduleTime, botName).catch(() => {
+        firingRef.current = false;
+        if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(`tg-fired-${key}`);
+      });
+    };
+
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [botId, botName, scheduleTime, enabled, botEnabled, onFire]);
+
+  if (!enabled || !botEnabled) return null;
+
+  return (
+    <span
+      className="min-w-[4.5rem] rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-center font-mono text-[11px] font-semibold tabular-nums text-sky-100"
+      title="Countdown until this schedule sends (Asia/Manila). Keep this page open."
+    >
+      {label}
+    </span>
+  );
 }
 
 export default function TelegramNotificationsPage() {
@@ -138,14 +208,28 @@ export default function TelegramNotificationsPage() {
     }
   };
 
+  const triggerScheduledSend = useCallback(async (botId: string, scheduleTime: string, botName: string) => {
+    const params = new URLSearchParams({ botId, scheduleTime });
+    const res = await fetch(`/api/admin/telegram/calendar-due?${params}`, { cache: "no-store" });
+    const json = await readJson<{ ok?: boolean; sent?: number; skipped?: string; error?: string; failed?: unknown }>(res);
+    if (!res.ok || !json.ok) {
+      const err = json.error || (Array.isArray(json.failed) ? "Telegram send failed." : json.skipped);
+      throw new Error(err || `Failed (${res.status})`);
+    }
+    if (json.skipped) return;
+    setNotice(`Scheduled send (${scheduleTime} Manila) for ${botName}: ${json.sent ?? 0} chat(s).`);
+  }, []);
+
   return (
     <div className="admin-card max-w-5xl">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="admin-title">Telegram Notifications</h1>
           <p className="admin-muted mt-1 max-w-3xl">
-            Add Telegram bots, chat IDs, send checklist, and Manila-time schedules. Bot tokens are saved server-side and are
-            not shown again after saving.
+            Add Telegram bots, chat IDs, send checklist, and Manila-time schedules. After you click Save, schedules run on the
+            server every few minutes (Vercel cron + GitHub Actions) — no one needs to be on the site. The countdown is a preview
+            when this page is open. Bot tokens are saved server-side (and Supabase shelf when configured) and are not shown
+            again after saving.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -332,7 +416,7 @@ export default function TelegramNotificationsPage() {
                 </div>
                 <div className="mt-2 space-y-2">
                   {bot.schedules.map((s) => (
-                    <div key={s.id} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] p-2">
+                    <div key={s.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] p-2">
                       <input
                         type="time"
                         value={s.time}
@@ -342,6 +426,14 @@ export default function TelegramNotificationsPage() {
                           })
                         }
                         className="admin-input py-1 text-xs"
+                      />
+                      <ScheduleCountdown
+                        botId={bot.id}
+                        botName={bot.name}
+                        scheduleTime={s.time}
+                        enabled={s.enabled}
+                        botEnabled={bot.enabled}
+                        onFire={triggerScheduledSend}
                       />
                       <label className="flex items-center gap-1 text-[11px] text-zinc-400">
                         <input
