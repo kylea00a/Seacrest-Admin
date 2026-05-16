@@ -321,9 +321,13 @@ export interface CashTransaction {
   credit: number;
   createdAt: string; // ISO
   /** Optional classification for idempotency / UI toggles. */
-  kind?: "sales_deposit" | "jj_sales_deposit" | "custom" | "bill_payment";
+  kind?: "sales_deposit" | "jj_sales_deposit" | "seacrest_sales_deposit" | "custom" | "bill_payment";
   /** When kind = sales_deposit, the sales day being deposited (YYYY-MM-DD). */
   salesDate?: string;
+  /** Bank-to-bank transfer: pairs debit (from) and credit (to) legs. */
+  transferPairId?: string;
+  /** Other account in a transfer pair (from on credit leg, to on debit leg). */
+  counterpartyAccountId?: string;
   /** When kind = sales_deposit, the calendar day it was marked deposited (YYYY-MM-DD). */
   depositedAt?: string;
   /** When kind = bill_payment, the expense id being paid. */

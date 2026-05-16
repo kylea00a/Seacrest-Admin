@@ -4,8 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import type { AdminSettings, BankAccount, CashTransaction } from "@/data/admin/types";
 import { isOrderExcludedFromSuccessMetrics, type ProductBreakdown } from "@/data/admin/ordersParse";
 import {
+  CHIP_FLAVOR_COLUMNS,
+  addChipsPiecesByFlavor,
+  chipsPiecesByFlavorFromOrder,
   chipsRepurchaseAmountFromOrder,
+  emptyChipsPiecesByFlavor,
   monthToRange,
+  type ChipFlavorKey,
 } from "@/lib/salesReportChipsRepurchase";
 
 function countFmt(n: number) {
@@ -32,7 +37,15 @@ async function safeReadJson<T>(res: Response): Promise<T> {
 
 type DailyRow = {
   date: string;
+  chipsPieces: Record<ChipFlavorKey, number>;
   chipsRepurchase: number;
+};
+
+type DepositDialogState = {
+  salesDate: string;
+  amount: number;
+  fromAccountId: string;
+  toAccountId: string;
 };
 
 export default function JjSalesReportPage() {
@@ -45,9 +58,7 @@ export default function JjSalesReportPage() {
   const [cashTx, setCashTx] = useState<CashTransaction[]>([]);
   const [depositingDay, setDepositingDay] = useState<string>("");
   const [drilldownDay, setDrilldownDay] = useState<string>("");
-  const [depositDialog, setDepositDialog] = useState<{ salesDate: string; amount: number; accountId: string } | null>(
-    null,
-  );
+  const [depositDialog, setDepositDialog] = useState<DepositDialogState | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -136,7 +147,7 @@ export default function JjSalesReportPage() {
     const add = (d: string): DailyRow => {
       const existing = out.get(d);
       if (existing) return existing;
-      const base: DailyRow = { date: d, chipsRepurchase: 0 };
+      const base: DailyRow = { date: d, chipsPieces: emptyChipsPiecesByFlavor(), chipsRepurchase: 0 };
       out.set(d, base);
       return base;
     };
@@ -150,7 +161,9 @@ export default function JjSalesReportPage() {
       const rep = row["repurchaseProducts"] as ProductBreakdown | undefined;
       const chipsAmt = chipsRepurchaseAmountFromOrder(rep, productPriceByName);
       if (chipsAmt <= 0) continue;
-      add(day).chipsRepurchase += chipsAmt;
+      const dr = add(day);
+      addChipsPiecesByFlavor(dr.chipsPieces, chipsPiecesByFlavorFromOrder(rep));
+      dr.chipsRepurchase += chipsAmt;
     }
 
     return Array.from(out.values()).sort((a, b) => a.date.localeCompare(b.date));
@@ -181,28 +194,47 @@ export default function JjSalesReportPage() {
     return { byInvoice, totals, excludedCount: excluded.length, includedCount: included.length };
   }, [drilldownDay, rows, productPriceByName, daily]);
 
-  const depositedBySalesDay = useMemo(() => {
-    const map = new Map<string, CashTransaction>();
-    for (const t of cashTx) {
-      if (t.kind === "jj_sales_deposit" && t.salesDate && !map.has(t.salesDate)) map.set(t.salesDate, t);
-    }
-    return map;
-  }, [cashTx]);
-
   const accountLabel = (accountId: string): string => {
     const a = cashAccounts.find((x) => x.id === accountId);
     return a ? `${a.name} (${a.bank})` : "Unknown bank";
   };
 
-  const depositSalesDay = async (salesDate: string, amount: number, accountId: string) => {
-    if (!accountId || !salesDate || amount <= 0) return;
+  const transferLabel = (fromId: string, toId: string) => {
+    if (!fromId || !toId) return accountLabel(toId || fromId);
+    return `${accountLabel(fromId)} → ${accountLabel(toId)}`;
+  };
+
+  const depositTransferForDay = (salesDate: string) => {
+    const txs = cashTx.filter((t) => t.kind === "jj_sales_deposit" && t.salesDate === salesDate);
+    const credit = txs.find((t) => t.credit > 0);
+    const debit = txs.find((t) => t.debit > 0);
+    if (!credit) return null;
+    return {
+      fromAccountId: debit?.accountId ?? credit.counterpartyAccountId ?? "",
+      toAccountId: credit.accountId,
+    };
+  };
+
+  const depositSalesDay = async (
+    salesDate: string,
+    amount: number,
+    fromAccountId: string,
+    toAccountId: string,
+  ) => {
+    if (!fromAccountId || !toAccountId || !salesDate || amount <= 0) return;
     setDepositingDay(salesDate);
     setError(null);
     try {
       const res = await fetch("/api/admin/cash", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "depositJjSalesDay", accountId, salesDate, amount }),
+        body: JSON.stringify({
+          action: "depositJjSalesDay",
+          fromAccountId,
+          toAccountId,
+          salesDate,
+          amount,
+        }),
       });
       const json = (await res.json()) as {
         ok?: boolean;
@@ -220,15 +252,15 @@ export default function JjSalesReportPage() {
     }
   };
 
-  const undoDepositSalesDay = async (tx: CashTransaction) => {
-    if (!tx.salesDate || !tx.accountId) return;
-    setDepositingDay(tx.salesDate);
+  const undoDepositSalesDay = async (salesDate: string) => {
+    if (!salesDate) return;
+    setDepositingDay(salesDate);
     setError(null);
     try {
       const res = await fetch("/api/admin/cash", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "undoDepositJjSalesDay", accountId: tx.accountId, salesDate: tx.salesDate }),
+        body: JSON.stringify({ action: "undoDepositJjSalesDay", salesDate }),
       });
       const json = (await res.json()) as {
         ok?: boolean;
@@ -287,18 +319,41 @@ export default function JjSalesReportPage() {
           <div className="mt-1 text-xs text-zinc-400">Successful orders with repurchase chips only</div>
 
           <div className="admin-table-wrap mt-3 max-w-full overflow-x-auto">
-            <table className="min-w-[520px] text-xs">
+            <table className="min-w-[720px] text-xs">
               <thead className="bg-black/30 text-zinc-300">
                 <tr>
-                  <th className="px-3 py-2 text-left">Date</th>
-                  <th className="px-3 py-2 text-right whitespace-nowrap">Chips repurchase</th>
-                  <th className="px-3 py-2 text-right whitespace-nowrap">Total</th>
+                  <th className="px-3 py-2 text-left" rowSpan={2}>
+                    Date
+                  </th>
+                  <th
+                    className="border-b border-white/10 px-2 py-1 text-center text-[10px] font-bold tracking-wide"
+                    colSpan={CHIP_FLAVOR_COLUMNS.length}
+                  >
+                    Chips pieces
+                  </th>
+                  <th className="px-3 py-2 text-right whitespace-nowrap" rowSpan={2}>
+                    Chips repurchase
+                  </th>
+                  <th className="px-3 py-2 text-right whitespace-nowrap" rowSpan={2}>
+                    Total
+                  </th>
+                </tr>
+                <tr>
+                  {CHIP_FLAVOR_COLUMNS.map((col) => (
+                    <th
+                      key={col.key}
+                      className="px-2 py-1 text-center text-[10px] font-semibold text-zinc-400"
+                      title={col.label}
+                    >
+                      {col.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10">
                 {daily.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-4 text-zinc-500" colSpan={3}>
+                    <td className="px-3 py-4 text-zinc-500" colSpan={CHIP_FLAVOR_COLUMNS.length + 3}>
                       No paid repurchase chips found for this month.
                     </td>
                   </tr>
@@ -315,6 +370,11 @@ export default function JjSalesReportPage() {
                           {d.date}
                         </button>
                       </td>
+                      {CHIP_FLAVOR_COLUMNS.map((col) => (
+                        <td key={col.key} className="px-2 py-2 text-center tabular-nums text-zinc-300">
+                          {d.chipsPieces[col.key] > 0 ? countFmt(d.chipsPieces[col.key]) : ""}
+                        </td>
+                      ))}
                       <td className="px-3 py-2 text-right tabular-nums">{currency(d.chipsRepurchase)}</td>
                       <td className="px-3 py-2 text-right tabular-nums font-semibold">{currency(d.chipsRepurchase)}</td>
                     </tr>
@@ -397,8 +457,8 @@ export default function JjSalesReportPage() {
         <div className="mt-6 border-t border-white/10 pt-5">
           <div className="text-sm font-semibold">Deposits</div>
           <div className="mt-1 text-xs text-zinc-400">
-            Deposit chips repurchase totals to a bank account. Creates a Cash Balances credit with description{" "}
-            <span className="font-mono">jj-sales-YYYY-MM-DD</span>.
+            Transfer chips repurchase totals bank-to-bank (
+            <span className="font-mono">jj-sales-YYYY-MM-DD</span>): debit on deposit from, credit on deposit to.
           </div>
 
           <div className="mt-4 max-h-80 overflow-auto rounded-xl border border-white/10 bg-black/20">
@@ -407,7 +467,7 @@ export default function JjSalesReportPage() {
                 <tr>
                   <th className="px-3 py-2 text-left">Sales day</th>
                   <th className="px-3 py-2 text-right">Amount</th>
-                  <th className="px-3 py-2 text-left">Bank</th>
+                  <th className="px-3 py-2 text-left">Transfer</th>
                   <th className="px-3 py-2 text-right">Deposit</th>
                 </tr>
               </thead>
@@ -421,33 +481,37 @@ export default function JjSalesReportPage() {
                 ) : (
                   daily.map((d) => {
                     const amt = d.chipsRepurchase;
-                    const deposited = depositedBySalesDay.get(d.date);
+                    const transfer = depositTransferForDay(d.date);
+                    const needsTwoBanks = cashAccounts.length >= 2;
                     return (
                       <tr key={`dep-${d.date}`} className="bg-black/10 text-zinc-100">
                         <td className="px-3 py-2 font-mono text-zinc-200">{d.date}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{currency(amt)}</td>
-                        <td className="px-3 py-2 text-zinc-300">{deposited ? accountLabel(deposited.accountId) : "—"}</td>
+                        <td className="px-3 py-2 text-zinc-300">
+                          {transfer ? transferLabel(transfer.fromAccountId, transfer.toAccountId) : "—"}
+                        </td>
                         <td className="px-3 py-2 text-right">
                           <button
                             type="button"
-                            disabled={amt <= 0 || depositingDay === d.date || (!deposited && cashAccounts.length === 0)}
+                            disabled={amt <= 0 || depositingDay === d.date || (!transfer && !needsTwoBanks)}
                             onClick={() => {
-                              if (deposited) void undoDepositSalesDay(deposited);
+                              if (transfer) void undoDepositSalesDay(d.date);
                               else
                                 setDepositDialog({
                                   salesDate: d.date,
                                   amount: amt,
-                                  accountId: cashAccounts[0]?.id ?? "",
+                                  fromAccountId: cashAccounts[0]?.id ?? "",
+                                  toAccountId: cashAccounts[1]?.id ?? cashAccounts[0]?.id ?? "",
                                 });
                             }}
                             className={[
                               "rounded-xl px-3 py-1.5 text-xs font-semibold disabled:opacity-60",
-                              deposited
+                              transfer
                                 ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15"
                                 : "border border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15",
                             ].join(" ")}
                           >
-                            {depositingDay === d.date ? "Saving…" : deposited ? "Undo" : "Deposit"}
+                            {depositingDay === d.date ? "Saving…" : transfer ? "Undo" : "Deposit"}
                           </button>
                         </td>
                       </tr>
@@ -481,14 +545,29 @@ export default function JjSalesReportPage() {
             </div>
 
             <label className="mt-4 block text-xs font-semibold text-zinc-400">
-              Deposit to bank
+              Deposit from
               <select
-                value={depositDialog.accountId}
-                onChange={(e) => setDepositDialog((p) => (p ? { ...p, accountId: e.target.value } : p))}
+                value={depositDialog.fromAccountId}
+                onChange={(e) => setDepositDialog((p) => (p ? { ...p, fromAccountId: e.target.value } : p))}
                 className="admin-select mt-1 w-full"
                 disabled={depositingDay === depositDialog.salesDate}
               >
-                {cashAccounts.length === 0 ? <option value="">No bank accounts</option> : null}
+                {cashAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.bank})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="mt-3 block text-xs font-semibold text-zinc-400">
+              Deposit to
+              <select
+                value={depositDialog.toAccountId}
+                onChange={(e) => setDepositDialog((p) => (p ? { ...p, toAccountId: e.target.value } : p))}
+                className="admin-select mt-1 w-full"
+                disabled={depositingDay === depositDialog.salesDate}
+              >
                 {cashAccounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name} ({a.bank})
@@ -498,7 +577,8 @@ export default function JjSalesReportPage() {
             </label>
 
             <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-zinc-300">
-              Cash Balances credit: <span className="font-mono text-zinc-100">jj-sales-{depositDialog.salesDate}</span>
+              Debit on deposit from, credit on deposit to (
+              <span className="font-mono text-zinc-100">jj-sales-{depositDialog.salesDate}</span>).
             </div>
 
             <div className="mt-4 flex justify-end gap-2">
@@ -513,10 +593,22 @@ export default function JjSalesReportPage() {
               <button
                 type="button"
                 className="admin-btn-primary"
-                disabled={!depositDialog.accountId || depositingDay === depositDialog.salesDate}
-                onClick={() => void depositSalesDay(depositDialog.salesDate, depositDialog.amount, depositDialog.accountId)}
+                disabled={
+                  !depositDialog.fromAccountId ||
+                  !depositDialog.toAccountId ||
+                  depositDialog.fromAccountId === depositDialog.toAccountId ||
+                  depositingDay === depositDialog.salesDate
+                }
+                onClick={() =>
+                  void depositSalesDay(
+                    depositDialog.salesDate,
+                    depositDialog.amount,
+                    depositDialog.fromAccountId,
+                    depositDialog.toAccountId,
+                  )
+                }
               >
-                {depositingDay === depositDialog.salesDate ? "Depositing…" : "Confirm deposit"}
+                {depositingDay === depositDialog.salesDate ? "Transferring…" : "Confirm transfer"}
               </button>
             </div>
           </div>

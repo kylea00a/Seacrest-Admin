@@ -46,7 +46,9 @@ export async function POST(req: Request) {
     action === "depositSalesDay" ||
     action === "undoDepositSalesDay" ||
     action === "depositJjSalesDay" ||
-    action === "undoDepositJjSalesDay"
+    action === "undoDepositJjSalesDay" ||
+    action === "depositSeacrestSalesDay" ||
+    action === "undoDepositSeacrestSalesDay"
   ) {
     const auth = await requireApiPermission(req, "salesReport");
     if (auth instanceof NextResponse) return auth;
@@ -143,38 +145,96 @@ export async function POST(req: Request) {
     action === "depositSalesDay" ||
     action === "undoDepositSalesDay" ||
     action === "depositJjSalesDay" ||
-    action === "undoDepositJjSalesDay"
+    action === "undoDepositJjSalesDay" ||
+    action === "depositSeacrestSalesDay" ||
+    action === "undoDepositSeacrestSalesDay"
   ) {
-    const accountId = typeof body.accountId === "string" ? body.accountId.trim() : "";
     const salesDate = typeof body.salesDate === "string" ? body.salesDate.trim() : "";
-    if (!accountId) return NextResponse.json({ error: "Missing `accountId`." }, { status: 400 });
     if (!isDateOnly(salesDate)) return NextResponse.json({ error: "Missing/invalid `salesDate` (YYYY-MM-DD)." }, { status: 400 });
-    if (!file.accounts.some((a) => a.id === accountId)) {
-      return NextResponse.json({ error: "Account not found." }, { status: 404 });
-    }
 
     const isJj = action === "depositJjSalesDay" || action === "undoDepositJjSalesDay";
-    const depositKind = isJj ? "jj_sales_deposit" : "sales_deposit";
-    const descriptionPrefix = isJj ? "jj-sales" : "sales";
+    const isSeacrest = action === "depositSeacrestSalesDay" || action === "undoDepositSeacrestSalesDay";
+    const isTransfer = isJj || isSeacrest;
+    const depositKind = isJj ? "jj_sales_deposit" : isSeacrest ? "seacrest_sales_deposit" : "sales_deposit";
+    const descriptionPrefix = isJj ? "jj-sales" : isSeacrest ? "seacrest-sales" : "sales";
 
-    const existingIdx = file.transactions.findIndex(
-      (t) => t.kind === depositKind && t.accountId === accountId && t.salesDate === salesDate,
-    );
+    const existingForDay = file.transactions.filter((t) => t.kind === depositKind && t.salesDate === salesDate);
 
-    if (action === "undoDepositSalesDay" || action === "undoDepositJjSalesDay") {
-      if (existingIdx >= 0) file.transactions.splice(existingIdx, 1);
+    if (action === "undoDepositSalesDay" || action === "undoDepositJjSalesDay" || action === "undoDepositSeacrestSalesDay") {
+      if (existingForDay.length > 0) {
+        const removeIds = new Set(existingForDay.map((t) => t.id));
+        file.transactions = file.transactions.filter((t) => !removeIds.has(t.id));
+      }
       saveCashLedger(file);
-      return NextResponse.json({ ok: true, undone: existingIdx >= 0, file });
+      return NextResponse.json({ ok: true, undone: existingForDay.length > 0, file });
     }
 
     const amount = num(body.amount);
     if (!Number.isFinite(amount) || amount <= 0) return NextResponse.json({ error: "Invalid `amount`." }, { status: 400 });
 
-    if (existingIdx >= 0) {
+    if (existingForDay.length > 0) {
       return NextResponse.json({ ok: true, existed: true, file });
     }
 
     const nowYmd = todayISO();
+
+    if (isTransfer) {
+      const fromAccountId = typeof body.fromAccountId === "string" ? body.fromAccountId.trim() : "";
+      const toAccountId = typeof body.toAccountId === "string" ? body.toAccountId.trim() : "";
+      if (!fromAccountId || !toAccountId) {
+        return NextResponse.json({ error: "Missing `fromAccountId` or `toAccountId`." }, { status: 400 });
+      }
+      if (fromAccountId === toAccountId) {
+        return NextResponse.json({ error: "Deposit from and deposit to must be different accounts." }, { status: 400 });
+      }
+      if (!file.accounts.some((a) => a.id === fromAccountId)) {
+        return NextResponse.json({ error: "Deposit from account not found." }, { status: 404 });
+      }
+      if (!file.accounts.some((a) => a.id === toAccountId)) {
+        return NextResponse.json({ error: "Deposit to account not found." }, { status: 404 });
+      }
+
+      const pairId = randomUUID();
+      const desc = `${descriptionPrefix}-${salesDate}`;
+      const debitTx: CashTransaction = {
+        id: randomUUID(),
+        accountId: fromAccountId,
+        date: nowYmd,
+        description: `${desc} (transfer out)`,
+        debit: amount,
+        credit: 0,
+        kind: depositKind,
+        salesDate,
+        depositedAt: nowYmd,
+        transferPairId: pairId,
+        counterpartyAccountId: toAccountId,
+        createdAt: new Date().toISOString(),
+      };
+      const creditTx: CashTransaction = {
+        id: randomUUID(),
+        accountId: toAccountId,
+        date: nowYmd,
+        description: `${desc} (transfer in)`,
+        debit: 0,
+        credit: amount,
+        kind: depositKind,
+        salesDate,
+        depositedAt: nowYmd,
+        transferPairId: pairId,
+        counterpartyAccountId: fromAccountId,
+        createdAt: new Date().toISOString(),
+      };
+      file.transactions.unshift(creditTx, debitTx);
+      saveCashLedger(file);
+      return NextResponse.json({ ok: true, tx: creditTx, file });
+    }
+
+    const accountId = typeof body.accountId === "string" ? body.accountId.trim() : "";
+    if (!accountId) return NextResponse.json({ error: "Missing `accountId`." }, { status: 400 });
+    if (!file.accounts.some((a) => a.id === accountId)) {
+      return NextResponse.json({ error: "Account not found." }, { status: 404 });
+    }
+
     const tx: CashTransaction = {
       id: randomUUID(),
       accountId,
