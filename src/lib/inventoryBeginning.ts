@@ -2,6 +2,9 @@ import type { InventoryEndingSnapshot } from "@/data/admin/types";
 
 export type InventoryEndingByDate = Record<string, InventoryEndingSnapshot | undefined>;
 
+/** Max days to roll forward when no encoded ending exists (keeps API fast). */
+const MAX_ROLL_FORWARD_DAYS = 90;
+
 /** Add calendar days to a YYYY-MM-DD string (UTC date math). */
 export function addDaysYmd(ymd: string, days: number): string {
   const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -33,25 +36,32 @@ export function lastEncodedDateBefore(targetDay: string, byDate: InventoryEnding
   return dates[0] ?? null;
 }
 
-export type NetByProductForDay = (day: string) => Promise<Record<string, number>>;
+/** Net (delivery in − out) aggregated over [start, end] inclusive. */
+export type NetByProductForRange = (start: string, end: string) => Promise<Record<string, number>>;
 
 export type BeginningResolution = {
   counts: Record<string, number>;
-  /** Human-readable note for UI (e.g. yesterday's date or cascade range). */
   sourceNote: string;
 };
 
+function applyNetToCounts(
+  counts: Record<string, number>,
+  productNames: string[],
+  net: Record<string, number>,
+): void {
+  for (const p of productNames) counts[p] = (counts[p] ?? 0) + (net[p] ?? 0);
+}
+
 /**
  * Beginning inventory for `targetDay`:
- * - If yesterday has an encoded ending, use that.
- * - Otherwise roll forward from the latest prior encoded ending, applying each day's net
- *   (delivery in − out) through yesterday.
+ * - If yesterday has an encoded ending, use that (instant).
+ * - Otherwise roll forward from the latest prior encoded ending using one batched net range query.
  */
 export async function resolveBeginningForDay(
   targetDay: string,
   byDate: InventoryEndingByDate | undefined,
   productNames: string[],
-  getNetForDay: NetByProductForDay,
+  getNetForRange: NetByProductForRange,
 ): Promise<BeginningResolution> {
   const yesterday = addDaysYmd(targetDay, -1);
 
@@ -64,35 +74,28 @@ export async function resolveBeginningForDay(
   }
 
   const anchor = lastEncodedDateBefore(targetDay, byDate);
-  let counts = anchor ? copyCounts(byDate![anchor]!.counts, productNames) : zeroCounts(productNames);
+  const counts = anchor ? copyCounts(byDate![anchor]!.counts, productNames) : zeroCounts(productNames);
 
   if (!anchor) {
-    let walk = addDaysYmd(targetDay, -365);
-    while (walk <= yesterday) {
-      const net = await getNetForDay(walk);
-      for (const p of productNames) counts[p] = (counts[p] ?? 0) + (net[p] ?? 0);
-      walk = addDaysYmd(walk, 1);
-    }
+    const rangeStart = addDaysYmd(targetDay, -MAX_ROLL_FORWARD_DAYS);
+    const net = await getNetForRange(rangeStart, yesterday);
+    applyNetToCounts(counts, productNames, net);
     return {
       counts,
       sourceNote: `Rolled forward through ${yesterday} (no encoded ending yet)`,
     };
   }
 
-  let walk = addDaysYmd(anchor, 1);
-  if (walk > yesterday) {
+  const rangeStart = addDaysYmd(anchor, 1);
+  if (rangeStart > yesterday) {
     return {
       counts,
       sourceNote: `Ending inventory from ${anchor}`,
     };
   }
 
-  while (walk <= yesterday) {
-    const net = await getNetForDay(walk);
-    for (const p of productNames) counts[p] = (counts[p] ?? 0) + (net[p] ?? 0);
-    walk = addDaysYmd(walk, 1);
-  }
-
+  const net = await getNetForRange(rangeStart, yesterday);
+  applyNetToCounts(counts, productNames, net);
   return {
     counts,
     sourceNote: `From ${anchor} ending through ${yesterday} (yesterday not encoded)`,

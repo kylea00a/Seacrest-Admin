@@ -79,23 +79,46 @@ export async function GET(req: Request) {
   const supply = loadInventorySupply();
   const ending = loadInventoryEnding();
 
-  let outDetails: Awaited<ReturnType<typeof computeClaimedOutDetailsForRange>> = [];
-  let outPeriod: Record<string, number> = {};
-  if (start === end) {
-    // Single-day inventory should be fast: compute detail once and derive totals from it.
-    outDetails = await computeClaimedOutDetailsForRange(start, end);
-    for (const o of outDetails) {
-      for (const ln of o.lines) outPeriod[ln.productName] = (outPeriod[ln.productName] ?? 0) + ln.qty;
-    }
-  } else {
-    [outPeriod, outDetails] = await Promise.all([
-      computeClaimedOutTotalsForRange(start, end),
-      computeClaimedOutDetailsForRange(start, end),
-    ]);
-  }
-  const deliveryInPeriod = sumSupplyByProductInRange(supply.entries, start, end);
-
   const productNames = settings.products.map((p) => p.name);
+
+  const getNetForRange = async (rangeStart: string, rangeEnd: string): Promise<Record<string, number>> => {
+    const [out, din] = await Promise.all([
+      computeClaimedOutTotalsForRange(rangeStart, rangeEnd),
+      Promise.resolve(sumSupplyByProductInRange(supply.entries, rangeStart, rangeEnd)),
+    ]);
+    const net: Record<string, number> = {};
+    for (const name of productNames) {
+      net[name] = (din[name] ?? 0) - (out[name] ?? 0);
+    }
+    return net;
+  };
+
+  const dayKey = start;
+  const endingRec = ending.byDate?.[dayKey] ?? null;
+
+  const [beginningResult, dayMovement] = await Promise.all([
+    resolveBeginningForDay(dayKey, ending.byDate, productNames, getNetForRange),
+    (async () => {
+      let outDetails: Awaited<ReturnType<typeof computeClaimedOutDetailsForRange>> = [];
+      let outPeriod: Record<string, number> = {};
+      if (start === end) {
+        outDetails = await computeClaimedOutDetailsForRange(start, end);
+        for (const o of outDetails) {
+          for (const ln of o.lines) outPeriod[ln.productName] = (outPeriod[ln.productName] ?? 0) + ln.qty;
+        }
+      } else {
+        [outPeriod, outDetails] = await Promise.all([
+          computeClaimedOutTotalsForRange(start, end),
+          computeClaimedOutDetailsForRange(start, end),
+        ]);
+      }
+      const deliveryInPeriod = sumSupplyByProductInRange(supply.entries, start, end);
+      return { outDetails, outPeriod, deliveryInPeriod };
+    })(),
+  ]);
+
+  const { counts: beginningBy, sourceNote: beginningSourceNote } = beginningResult;
+  const { outDetails, outPeriod, deliveryInPeriod } = dayMovement;
   const allKeys = new Set<string>([...productNames, ...Object.keys(deliveryInPeriod), ...Object.keys(outPeriod)]);
 
   const rows = [...allKeys].sort((a, b) => a.localeCompare(b)).map((name) => {
@@ -116,26 +139,7 @@ export async function GET(req: Request) {
     })
     .sort((a, b) => b.at.localeCompare(a.at));
 
-  const dayKey = start; // inventory page uses a single day
-  const endingRec = ending.byDate?.[dayKey] ?? null;
   const canEditEncodedEnding = !endingRec?.locked || (auth.isSuperadmin && Boolean(settings.allowSuperadminEditEncodedInventory));
-
-  const getNetForDay = async (day: string): Promise<Record<string, number>> => {
-    const out = await computeClaimedOutTotalsForRange(day, day);
-    const din = sumSupplyByProductInRange(supply.entries, day, day);
-    const net: Record<string, number> = {};
-    for (const name of productNames) {
-      net[name] = (din[name] ?? 0) - (out[name] ?? 0);
-    }
-    return net;
-  };
-
-  const { counts: beginningBy, sourceNote: beginningSourceNote } = await resolveBeginningForDay(
-    dayKey,
-    ending.byDate,
-    productNames,
-    getNetForDay,
-  );
 
   const expectedEndingBy: Record<string, number> = {};
   const discrepancyBy: Record<string, number> = {};
@@ -252,9 +256,11 @@ export async function PUT(req: Request) {
   }
 
   const supply = loadInventorySupply();
-  const getNetForDay = async (day: string): Promise<Record<string, number>> => {
-    const out = await computeClaimedOutTotalsForRange(day, day);
-    const din = sumSupplyByProductInRange(supply.entries, day, day);
+  const getNetForRange = async (rangeStart: string, rangeEnd: string): Promise<Record<string, number>> => {
+    const [out, din] = await Promise.all([
+      computeClaimedOutTotalsForRange(rangeStart, rangeEnd),
+      Promise.resolve(sumSupplyByProductInRange(supply.entries, rangeStart, rangeEnd)),
+    ]);
     const net: Record<string, number> = {};
     for (const name of productNames) {
       net[name] = (din[name] ?? 0) - (out[name] ?? 0);
@@ -262,9 +268,11 @@ export async function PUT(req: Request) {
     return net;
   };
 
-  const { counts: beginningBy } = await resolveBeginningForDay(date, ending.byDate, productNames, getNetForDay);
-  const out = await computeClaimedOutTotalsForRange(date, date);
-  const din = sumSupplyByProductInRange(supply.entries, date, date);
+  const [{ counts: beginningBy }, out, din] = await Promise.all([
+    resolveBeginningForDay(date, ending.byDate, productNames, getNetForRange),
+    computeClaimedOutTotalsForRange(date, date),
+    Promise.resolve(sumSupplyByProductInRange(supply.entries, date, date)),
+  ]);
   const discrepancyBy: Record<string, number> = {};
   for (const p of productNames) {
     const expected = (beginningBy[p] ?? 0) + (din[p] ?? 0) - (out[p] ?? 0);
