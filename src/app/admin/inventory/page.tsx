@@ -18,6 +18,7 @@ async function safeReadJson<T>(res: Response): Promise<T> {
 type Row = {
   productName: string;
   deliveryIn: number;
+  rtsIn: number;
   out: number;
   netPeriod: number;
 };
@@ -82,7 +83,7 @@ export default function InventoryPage() {
   const [saving, setSaving] = useState(false);
   const [outDetails, setOutDetails] = useState<OutOrderDetail[]>([]);
   const [outByOrderDeliveryFilter, setOutByOrderDeliveryFilter] = useState<"All" | "Pickup" | "Delivery">("All");
-  const [dayTotals, setDayTotals] = useState<{ deliveryIn: number; out: number } | null>(null);
+  const [dayTotals, setDayTotals] = useState<{ deliveryIn: number; rtsIn: number; out: number } | null>(null);
 
   const loadOutDetails = useCallback(async (start: string, end: string) => {
     setLoadingOutDetails(true);
@@ -110,7 +111,7 @@ export default function InventoryPage() {
       const json = await safeReadJson<{
         rows?: Row[];
         entries?: Entry[];
-        totals?: { deliveryIn: number; out: number };
+        totals?: { deliveryIn: number; rtsIn: number; out: number };
         productNames?: string[];
         beginningBy?: Record<string, number>;
         beginningSourceNote?: string;
@@ -231,7 +232,11 @@ export default function InventoryPage() {
       <h1 className="admin-title">Inventory</h1>
       <p className="admin-muted mt-1 max-w-3xl">
         Pick <strong>one day</strong> (same calendar design as All Orders, but a single date) to see{" "}
-        <strong>delivery in</strong> and <strong>out</strong> for that day. Use the arrows to move the calendar by{" "}
+        <strong>delivery in</strong>, <strong>RTS in</strong>, and <strong>out</strong> for that day (from{" "}
+        <a href="/admin/inventory-flow" className="text-sky-400 hover:underline">
+          Inventory Flow
+        </a>
+        ). Use the arrows to move the calendar by{" "}
         <strong>two months</strong>. <strong>Out</strong> uses orders claimed on that effective date.
       </p>
 
@@ -318,6 +323,10 @@ export default function InventoryPage() {
               <span className="font-semibold tabular-nums text-emerald-300/90">{dayTotals.deliveryIn}</span>
             </div>
             <div>
+              <span className="text-zinc-500">RTS in</span>{" "}
+              <span className="font-semibold tabular-nums text-violet-300/90">{dayTotals.rtsIn ?? 0}</span>
+            </div>
+            <div>
               <span className="text-zinc-500">Out (claimed)</span>{" "}
               <span className="font-semibold tabular-nums text-rose-300/90">{dayTotals.out}</span>
             </div>
@@ -325,14 +334,14 @@ export default function InventoryPage() {
               <span className="text-zinc-500">Net</span>{" "}
               <span
                 className={`font-semibold tabular-nums ${
-                  dayTotals.deliveryIn - dayTotals.out < 0
+                  dayTotals.deliveryIn + (dayTotals.rtsIn ?? 0) - dayTotals.out < 0
                     ? "text-amber-400"
-                    : dayTotals.deliveryIn - dayTotals.out > 0
+                    : dayTotals.deliveryIn + (dayTotals.rtsIn ?? 0) - dayTotals.out > 0
                       ? "text-emerald-400/90"
                       : "text-zinc-300"
                 }`}
               >
-                {dayTotals.deliveryIn - dayTotals.out}
+                {dayTotals.deliveryIn + (dayTotals.rtsIn ?? 0) - dayTotals.out}
               </span>
             </div>
           </div>
@@ -351,6 +360,7 @@ export default function InventoryPage() {
                 <th className="px-3 py-2 text-left">Product</th>
                 <th className="px-3 py-2 text-right whitespace-nowrap">Beginning</th>
                 <th className="px-3 py-2 text-right">Delivery in</th>
+                <th className="px-3 py-2 text-right">RTS in</th>
                 <th className="px-3 py-2 text-right">Out (claimed)</th>
                 <th className="px-3 py-2 text-right">Net</th>
                 <th className="px-3 py-2 text-right whitespace-nowrap">Ending (encode)</th>
@@ -361,7 +371,7 @@ export default function InventoryPage() {
             <tbody className="divide-y divide-white/10">
               {rows.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-4 text-zinc-500" colSpan={8}>
+                  <td className="px-3 py-4 text-zinc-500" colSpan={9}>
                     No products in settings yet, or no movement on this day.
                   </td>
                 </tr>
@@ -373,6 +383,7 @@ export default function InventoryPage() {
                       {beginningBy[r.productName] != null ? beginningBy[r.productName] : 0}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-emerald-300/90">{r.deliveryIn}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-violet-300/90">{r.rtsIn ?? 0}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-rose-300/90">{r.out}</td>
                     <td
                       className={`px-3 py-2 text-right font-medium tabular-nums ${

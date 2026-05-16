@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { computeClaimedOutDetailsForRange, computeClaimedOutTotalsForRange } from "@/data/admin/inventoryCompute";
+import { computeClaimedOutDetailsForRange } from "@/data/admin/inventoryCompute";
 import {
   loadAdminSettings,
   loadInventoryEnding,
@@ -11,7 +11,13 @@ import {
 import type { InventoryEndingSnapshot } from "@/data/admin/types";
 import type { InventorySupplyEntry } from "@/data/admin/types";
 import { requireApiPermission } from "@/lib/adminApiAuth";
-import { resolveBeginningForDay } from "@/lib/inventoryBeginning";
+import {
+  getInventoryFlowRow,
+  syncInventoryFlowDay,
+  syncInventoryFlowRange,
+  touchInventoryFlowAround,
+} from "@/lib/inventoryFlow";
+import { addDaysYmd } from "@/lib/inventoryBeginning";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -28,16 +34,6 @@ function todayISO(): string {
   return `${y}-${m}-${day}`;
 }
 
-function sumSupplyByProduct(entries: InventorySupplyEntry[]): Record<string, number> {
-  const inBy: Record<string, number> = {};
-  for (const e of entries) {
-    const name = (e.productName ?? "").trim();
-    if (!name || !Number.isFinite(e.quantity) || e.quantity <= 0) continue;
-    inBy[name] = (inBy[name] ?? 0) + e.quantity;
-  }
-  return inBy;
-}
-
 function entryDayKey(at: string): string {
   if (at.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(at)) return at.slice(0, 10);
   try {
@@ -45,18 +41,6 @@ function entryDayKey(at: string): string {
   } catch {
     return "";
   }
-}
-
-function sumSupplyByProductInRange(
-  entries: InventorySupplyEntry[],
-  start: string,
-  end: string,
-): Record<string, number> {
-  const filtered = entries.filter((e) => {
-    const k = entryDayKey(e.at);
-    return k >= start && k <= end;
-  });
-  return sumSupplyByProduct(filtered);
 }
 
 export async function GET(req: Request) {
@@ -89,65 +73,62 @@ export async function GET(req: Request) {
   const dayKey = start;
   const endingRec = ending.byDate?.[dayKey] ?? null;
 
-  const getNetForRange = async (rangeStart: string, rangeEnd: string): Promise<Record<string, number>> => {
-    const [out, din] = await Promise.all([
-      computeClaimedOutTotalsForRange(rangeStart, rangeEnd),
-      Promise.resolve(sumSupplyByProductInRange(supply.entries, rangeStart, rangeEnd)),
-    ]);
-    const net: Record<string, number> = {};
-    for (const name of productNames) {
-      net[name] = (din[name] ?? 0) - (out[name] ?? 0);
-    }
-    return net;
-  };
+  let flowRow = getInventoryFlowRow(dayKey);
+  if (!flowRow) {
+    await syncInventoryFlowRange(addDaysYmd(dayKey, -1), dayKey);
+    flowRow = getInventoryFlowRow(dayKey) ?? (await syncInventoryFlowDay(dayKey));
+  }
 
-  const deliveryInPeriod = sumSupplyByProductInRange(supply.entries, start, end);
+  const beginningBy = flowRow.beginning;
+  const beginningSourceNote = `From inventory flow (ending on ${addDaysYmd(dayKey, -1)})`;
 
-  const [beginningResult, outPeriod] = await Promise.all([
-    resolveBeginningForDay(dayKey, ending.byDate, productNames, getNetForRange),
-    computeClaimedOutTotalsForRange(start, end),
+  const deliveryInPeriod = flowRow.delivery;
+  const rtsInPeriod = flowRow.rtsIn;
+  const outPeriod = flowRow.out;
+
+  const allKeys = new Set<string>([
+    ...productNames,
+    ...Object.keys(deliveryInPeriod),
+    ...Object.keys(rtsInPeriod),
+    ...Object.keys(outPeriod),
   ]);
-
-  const { counts: beginningBy, sourceNote: beginningSourceNote } = beginningResult;
-
-  const allKeys = new Set<string>([...productNames, ...Object.keys(deliveryInPeriod), ...Object.keys(outPeriod)]);
   const rows = [...allKeys].sort((a, b) => a.localeCompare(b)).map((name) => {
     const din = deliveryInPeriod[name] ?? 0;
+    const rts = rtsInPeriod[name] ?? 0;
     const out = outPeriod[name] ?? 0;
     return {
       productName: name,
       deliveryIn: din,
+      rtsIn: rts,
       out,
-      netPeriod: din - out,
+      netPeriod: din + rts - out,
     };
   });
 
   const entriesInPeriod = supply.entries
-    .filter((e) => {
-      const k = entryDayKey(e.at);
-      return k >= start && k <= end;
-    })
+    .filter((e) => entryDayKey(e.at) === dayKey)
     .sort((a, b) => b.at.localeCompare(a.at));
 
   const canEditEncodedEnding =
     !endingRec?.locked || (auth.isSuperadmin && Boolean(settings.allowSuperadminEditEncodedInventory));
 
-  const expectedEndingBy: Record<string, number> = {};
+  const expectedEndingBy = flowRow.ending;
   const discrepancyBy: Record<string, number> = {};
   for (const r of rows) {
-    const expected = (beginningBy[r.productName] ?? 0) + r.netPeriod;
-    expectedEndingBy[r.productName] = expected;
     if (endingRec?.counts) {
       const actual = endingRec.counts[r.productName] ?? 0;
+      const expected = expectedEndingBy[r.productName] ?? 0;
       const diff = actual - expected;
       if (diff !== 0) discrepancyBy[r.productName] = diff;
     }
   }
 
   let totalDeliveryIn = 0;
+  let totalRtsIn = 0;
   let totalOut = 0;
   for (const r of rows) {
     totalDeliveryIn += r.deliveryIn;
+    totalRtsIn += r.rtsIn;
     totalOut += r.out;
   }
 
@@ -158,7 +139,7 @@ export async function GET(req: Request) {
     rows,
     entries: entriesInPeriod,
     outDetails: [],
-    totals: { deliveryIn: totalDeliveryIn, out: totalOut },
+    totals: { deliveryIn: totalDeliveryIn, rtsIn: totalRtsIn, out: totalOut },
     beginningBy,
     beginningSourceNote,
     ending: endingRec,
@@ -209,6 +190,9 @@ export async function POST(req: Request) {
   supply.entries.push(entry);
   saveInventorySupply(supply);
 
+  const day = entryDayKey(entry.at);
+  if (day) await touchInventoryFlowAround(day);
+
   return NextResponse.json({ ok: true, entry });
 }
 
@@ -246,27 +230,12 @@ export async function PUT(req: Request) {
     cleanCounts[p] = Number.isFinite(n) && n >= 0 ? n : 0;
   }
 
-  const supply = loadInventorySupply();
-  const getNetForRange = async (rangeStart: string, rangeEnd: string): Promise<Record<string, number>> => {
-    const [out, din] = await Promise.all([
-      computeClaimedOutTotalsForRange(rangeStart, rangeEnd),
-      Promise.resolve(sumSupplyByProductInRange(supply.entries, rangeStart, rangeEnd)),
-    ]);
-    const net: Record<string, number> = {};
-    for (const name of productNames) {
-      net[name] = (din[name] ?? 0) - (out[name] ?? 0);
-    }
-    return net;
-  };
+  let flowRow = getInventoryFlowRow(date);
+  if (!flowRow) flowRow = await syncInventoryFlowDay(date);
 
-  const [{ counts: beginningBy }, out, din] = await Promise.all([
-    resolveBeginningForDay(date, ending.byDate, productNames, getNetForRange),
-    computeClaimedOutTotalsForRange(date, date),
-    Promise.resolve(sumSupplyByProductInRange(supply.entries, date, date)),
-  ]);
   const discrepancyBy: Record<string, number> = {};
   for (const p of productNames) {
-    const expected = (beginningBy[p] ?? 0) + (din[p] ?? 0) - (out[p] ?? 0);
+    const expected = flowRow.ending[p] ?? 0;
     const diff = (cleanCounts[p] ?? 0) - expected;
     if (diff !== 0) discrepancyBy[p] = diff;
   }
@@ -285,5 +254,6 @@ export async function PUT(req: Request) {
   ending.byDate = ending.byDate ?? {};
   ending.byDate[date] = rec;
   saveInventoryEnding(ending);
+
   return NextResponse.json({ ok: true, ending: rec });
 }

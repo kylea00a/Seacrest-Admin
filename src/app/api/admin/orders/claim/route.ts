@@ -3,6 +3,7 @@ import { calendarYmdInTimeZone } from "@/data/admin/orderClaim";
 import { canClaimPickupOrder } from "@/data/admin/orderInvoiceLookup";
 import { loadOrderClaims, saveOrderClaims } from "@/data/admin/storage";
 import { requireApiAnyPermission } from "@/lib/adminApiAuth";
+import { touchInventoryFlowAround } from "@/lib/inventoryFlow";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -33,6 +34,9 @@ export async function POST(req: Request) {
     claimDate: calendarYmdInTimeZone(now, "Asia/Manila"),
   };
   saveOrderClaims(map);
+
+  const claimDate = map[invoiceNumber]?.claimDate;
+  if (claimDate) await touchInventoryFlowAround(claimDate);
 
   return NextResponse.json({
     ok: true,

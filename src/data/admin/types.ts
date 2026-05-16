@@ -260,6 +260,27 @@ export interface InventorySupplyEntry {
   at: string; // ISO
 }
 
+/** Return-to-stock (RTS) received back into inventory for a calendar day. */
+export interface InventoryRtsInEntry {
+  id: string;
+  productName: string;
+  quantity: number;
+  note?: string;
+  at: string; // ISO
+}
+
+/** One day in the inventory flow ledger (source of truth for beginning/ending chain). */
+export interface InventoryFlowDayRow {
+  date: string; // YYYY-MM-DD
+  beginning: Record<string, number>;
+  delivery: Record<string, number>;
+  rtsIn: Record<string, number>;
+  out: Record<string, number>;
+  /** Calculated: beginning + delivery + rtsIn − out */
+  ending: Record<string, number>;
+  updatedAt: string; // ISO
+}
+
 /** Staff-encoded ending inventory snapshot for a calendar day (YYYY-MM-DD). */
 export interface InventoryEndingSnapshot {
   date: string;

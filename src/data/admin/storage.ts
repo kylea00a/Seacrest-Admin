@@ -9,6 +9,7 @@ import type {
   CashTransaction,
   Department,
   Expense,
+  InventoryRtsInEntry,
   InventorySupplyEntry,
   OrderClaimRecord,
   OrdersImportSummary,
@@ -37,6 +38,8 @@ const DELIVERY_TRACKING_FILE = path.join(ADMIN_DATA_DIR, "deliveryTracking.json"
 const ORDER_ADJUSTMENTS_FILE = path.join(ADMIN_DATA_DIR, "orderAdjustments.json");
 const ORDER_CLAIMS_FILE = path.join(ADMIN_DATA_DIR, "orderClaims.json");
 const INVENTORY_SUPPLY_FILE = path.join(ADMIN_DATA_DIR, "inventorySupply.json");
+const INVENTORY_RTS_IN_FILE = path.join(ADMIN_DATA_DIR, "inventoryRtsIn.json");
+const INVENTORY_FLOW_FILE = path.join(ADMIN_DATA_DIR, "inventoryFlow.json");
 const INVENTORY_ENDING_FILE = path.join(ADMIN_DATA_DIR, "inventoryEnding.json");
 const CASH_LEDGER_FILE = path.join(ADMIN_DATA_DIR, "cashLedger.json");
 const REMINDERS_FILE = path.join(ADMIN_DATA_DIR, "reminders.json");
@@ -403,5 +406,38 @@ export function loadInventoryEnding(): InventoryEndingFile {
 
 export function saveInventoryEnding(data: InventoryEndingFile) {
   writeJsonFile(INVENTORY_ENDING_FILE, data);
+}
+
+export type InventoryRtsInFile = {
+  entries: InventoryRtsInEntry[];
+};
+
+export function loadInventoryRtsIn(): InventoryRtsInFile {
+  const raw = readJsonFile<unknown>(INVENTORY_RTS_IN_FILE, { entries: [] });
+  if (raw && typeof raw === "object" && Array.isArray((raw as InventoryRtsInFile).entries)) {
+    return raw as InventoryRtsInFile;
+  }
+  return { entries: [] };
+}
+
+export function saveInventoryRtsIn(data: InventoryRtsInFile) {
+  writeJsonFile(INVENTORY_RTS_IN_FILE, data);
+}
+
+export type InventoryFlowFile = {
+  byDate: Record<string, import("./types").InventoryFlowDayRow>;
+};
+
+export function loadInventoryFlow(): InventoryFlowFile {
+  const raw = readJsonFile<unknown>(INVENTORY_FLOW_FILE, { byDate: {} });
+  const r = raw as Record<string, unknown> | null;
+  if (r && typeof r === "object" && r["byDate"] && typeof r["byDate"] === "object") {
+    return raw as InventoryFlowFile;
+  }
+  return { byDate: {} };
+}
+
+export function saveInventoryFlow(data: InventoryFlowFile) {
+  writeJsonFile(INVENTORY_FLOW_FILE, data);
 }
 
