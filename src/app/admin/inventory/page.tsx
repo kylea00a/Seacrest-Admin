@@ -69,6 +69,7 @@ export default function InventoryPage() {
   const [expectedEndingBy, setExpectedEndingBy] = useState<Record<string, number>>({});
   const [discrepancyBy, setDiscrepancyBy] = useState<Record<string, number>>({});
   const [beginningBy, setBeginningBy] = useState<Record<string, number>>({});
+  const [beginningSourceNote, setBeginningSourceNote] = useState<string>("");
   const [endingDraft, setEndingDraft] = useState<Record<string, string>>({});
   const [savingEnding, setSavingEnding] = useState(false);
   const [rangeLabel, setRangeLabel] = useState<{ start: string; end: string }>({ start: "", end: "" });
@@ -96,6 +97,7 @@ export default function InventoryPage() {
         totals?: { deliveryIn: number; out: number };
         productNames?: string[];
         beginningBy?: Record<string, number>;
+        beginningSourceNote?: string;
         ending?: EndingSnapshot | null;
         canEditEncodedEnding?: boolean;
         expectedEndingBy?: Record<string, number>;
@@ -113,6 +115,7 @@ export default function InventoryPage() {
       setEnding((json.ending ?? null) as EndingSnapshot | null);
       setCanEditEncodedEnding(Boolean(json.canEditEncodedEnding));
       setBeginningBy((json.beginningBy ?? {}) as Record<string, number>);
+      setBeginningSourceNote(json.beginningSourceNote ?? "");
       setExpectedEndingBy((json.expectedEndingBy ?? {}) as Record<string, number>);
       setDiscrepancyBy((json.discrepancyBy ?? {}) as Record<string, number>);
       const nextDraft: Record<string, string> = {};
@@ -322,6 +325,9 @@ export default function InventoryPage() {
 
       <div className="mt-6">
         <div className="text-sm font-semibold text-zinc-200">Product flow ({dayDescription || "—"})</div>
+        {beginningSourceNote ? (
+          <p className="mt-1 text-xs text-zinc-500">Beginning: {beginningSourceNote}</p>
+        ) : null}
         <div className="admin-table-wrap mt-2">
           <table className="min-w-full text-xs">
             <thead className="bg-black/30 text-zinc-300">

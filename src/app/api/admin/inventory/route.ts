@@ -11,6 +11,7 @@ import {
 import type { InventoryEndingSnapshot } from "@/data/admin/types";
 import type { InventorySupplyEntry } from "@/data/admin/types";
 import { requireApiPermission } from "@/lib/adminApiAuth";
+import { resolveBeginningForDay } from "@/lib/inventoryBeginning";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -119,20 +120,29 @@ export async function GET(req: Request) {
   const endingRec = ending.byDate?.[dayKey] ?? null;
   const canEditEncodedEnding = !endingRec?.locked || (auth.isSuperadmin && Boolean(settings.allowSuperadminEditEncodedInventory));
 
-  // Find previous encoded ending snapshot to compute expected ending and discrepancy.
-  const prevDate = Object.keys(ending.byDate ?? {})
-    .filter((d) => d < dayKey)
-    .sort((a, b) => b.localeCompare(a))[0];
-  const prevRec = prevDate ? ending.byDate[prevDate] : undefined;
-  const beginningBy = prevRec?.counts ?? {};
+  const getNetForDay = async (day: string): Promise<Record<string, number>> => {
+    const out = await computeClaimedOutTotalsForRange(day, day);
+    const din = sumSupplyByProductInRange(supply.entries, day, day);
+    const net: Record<string, number> = {};
+    for (const name of productNames) {
+      net[name] = (din[name] ?? 0) - (out[name] ?? 0);
+    }
+    return net;
+  };
+
+  const { counts: beginningBy, sourceNote: beginningSourceNote } = await resolveBeginningForDay(
+    dayKey,
+    ending.byDate,
+    productNames,
+    getNetForDay,
+  );
 
   const expectedEndingBy: Record<string, number> = {};
   const discrepancyBy: Record<string, number> = {};
-  if (endingRec?.counts) {
-    for (const r of rows) {
-      const prevEnd = prevRec?.counts?.[r.productName] ?? 0;
-      const expected = prevEnd + r.netPeriod;
-      expectedEndingBy[r.productName] = expected;
+  for (const r of rows) {
+    const expected = (beginningBy[r.productName] ?? 0) + r.netPeriod;
+    expectedEndingBy[r.productName] = expected;
+    if (endingRec?.counts) {
       const actual = endingRec.counts[r.productName] ?? 0;
       const diff = actual - expected;
       if (diff !== 0) discrepancyBy[r.productName] = diff;
@@ -155,6 +165,7 @@ export async function GET(req: Request) {
     outDetails,
     totals: { deliveryIn: totalDeliveryIn, out: totalOut },
     beginningBy,
+    beginningSourceNote,
     ending: endingRec,
     canEditEncodedEnding,
     expectedEndingBy,
@@ -231,27 +242,32 @@ export async function PUT(req: Request) {
     }
   }
 
-  // Previous encoded snapshot (for expected ending).
-  const prevDate = Object.keys(ending.byDate ?? {})
-    .filter((d) => d < date)
-    .sort((a, b) => b.localeCompare(a))[0];
-  const prevRec = prevDate ? ending.byDate[prevDate] : undefined;
-
+  const productNames = settings.products.map((x) => x.name);
   const countsIn = countsRaw as Record<string, unknown>;
   const cleanCounts: Record<string, number> = {};
-  for (const p of settings.products.map((x) => x.name)) {
+  for (const p of productNames) {
     const v = countsIn[p];
     const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : 0;
     cleanCounts[p] = Number.isFinite(n) && n >= 0 ? n : 0;
   }
 
-  // Compute discrepancy snapshot at encode time.
   const supply = loadInventorySupply();
+  const getNetForDay = async (day: string): Promise<Record<string, number>> => {
+    const out = await computeClaimedOutTotalsForRange(day, day);
+    const din = sumSupplyByProductInRange(supply.entries, day, day);
+    const net: Record<string, number> = {};
+    for (const name of productNames) {
+      net[name] = (din[name] ?? 0) - (out[name] ?? 0);
+    }
+    return net;
+  };
+
+  const { counts: beginningBy } = await resolveBeginningForDay(date, ending.byDate, productNames, getNetForDay);
   const out = await computeClaimedOutTotalsForRange(date, date);
   const din = sumSupplyByProductInRange(supply.entries, date, date);
   const discrepancyBy: Record<string, number> = {};
-  for (const p of settings.products.map((x) => x.name)) {
-    const expected = (prevRec?.counts?.[p] ?? 0) + (din[p] ?? 0) - (out[p] ?? 0);
+  for (const p of productNames) {
+    const expected = (beginningBy[p] ?? 0) + (din[p] ?? 0) - (out[p] ?? 0);
     const diff = (cleanCounts[p] ?? 0) - expected;
     if (diff !== 0) discrepancyBy[p] = diff;
   }
