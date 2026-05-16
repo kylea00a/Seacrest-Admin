@@ -291,7 +291,7 @@ export interface CashTransaction {
   credit: number;
   createdAt: string; // ISO
   /** Optional classification for idempotency / UI toggles. */
-  kind?: "sales_deposit" | "custom" | "bill_payment";
+  kind?: "sales_deposit" | "jj_sales_deposit" | "custom" | "bill_payment";
   /** When kind = sales_deposit, the sales day being deposited (YYYY-MM-DD). */
   salesDate?: string;
   /** When kind = sales_deposit, the calendar day it was marked deposited (YYYY-MM-DD). */

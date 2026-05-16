@@ -42,7 +42,12 @@ export async function POST(req: Request) {
   if (action === "upsertAccount" || action === "deleteAccount") {
     const auth = await requireApiPermission(req, "settings");
     if (auth instanceof NextResponse) return auth;
-  } else if (action === "depositSalesDay" || action === "undoDepositSalesDay") {
+  } else if (
+    action === "depositSalesDay" ||
+    action === "undoDepositSalesDay" ||
+    action === "depositJjSalesDay" ||
+    action === "undoDepositJjSalesDay"
+  ) {
     const auth = await requireApiPermission(req, "salesReport");
     if (auth instanceof NextResponse) return auth;
   } else if (action === "addTransaction") {
@@ -134,7 +139,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, deleted, file });
   }
 
-  if (action === "depositSalesDay" || action === "undoDepositSalesDay") {
+  if (
+    action === "depositSalesDay" ||
+    action === "undoDepositSalesDay" ||
+    action === "depositJjSalesDay" ||
+    action === "undoDepositJjSalesDay"
+  ) {
     const accountId = typeof body.accountId === "string" ? body.accountId.trim() : "";
     const salesDate = typeof body.salesDate === "string" ? body.salesDate.trim() : "";
     if (!accountId) return NextResponse.json({ error: "Missing `accountId`." }, { status: 400 });
@@ -143,11 +153,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Account not found." }, { status: 404 });
     }
 
+    const isJj = action === "depositJjSalesDay" || action === "undoDepositJjSalesDay";
+    const depositKind = isJj ? "jj_sales_deposit" : "sales_deposit";
+    const descriptionPrefix = isJj ? "jj-sales" : "sales";
+
     const existingIdx = file.transactions.findIndex(
-      (t) => t.kind === "sales_deposit" && t.accountId === accountId && t.salesDate === salesDate,
+      (t) => t.kind === depositKind && t.accountId === accountId && t.salesDate === salesDate,
     );
 
-    if (action === "undoDepositSalesDay") {
+    if (action === "undoDepositSalesDay" || action === "undoDepositJjSalesDay") {
       if (existingIdx >= 0) file.transactions.splice(existingIdx, 1);
       saveCashLedger(file);
       return NextResponse.json({ ok: true, undone: existingIdx >= 0, file });
@@ -157,7 +171,6 @@ export async function POST(req: Request) {
     if (!Number.isFinite(amount) || amount <= 0) return NextResponse.json({ error: "Invalid `amount`." }, { status: 400 });
 
     if (existingIdx >= 0) {
-      // Idempotent: already deposited.
       return NextResponse.json({ ok: true, existed: true, file });
     }
 
@@ -166,10 +179,10 @@ export async function POST(req: Request) {
       id: randomUUID(),
       accountId,
       date: nowYmd,
-      description: `sales-${salesDate}`,
+      description: `${descriptionPrefix}-${salesDate}`,
       debit: 0,
       credit: amount,
-      kind: "sales_deposit",
+      kind: depositKind,
       salesDate,
       depositedAt: nowYmd,
       createdAt: new Date().toISOString(),

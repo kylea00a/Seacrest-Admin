@@ -58,6 +58,7 @@ export function adminPathToPermissionKey(pathname: string): AdminPermissionKey |
     "wallet-transactions": "pettyCash",
     payouts: "pettyCash",
     "sales-report": "salesReport",
+    "jj-sales-report": "salesReport",
     "product-calculator": "productCalculator",
     import: "import",
     orders: "orders",
