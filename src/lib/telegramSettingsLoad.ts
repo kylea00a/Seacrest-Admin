@@ -1,10 +1,16 @@
 import {
   loadTelegramNotificationSettings,
   loadTelegramSendLog,
+  saveTelegramNotificationSettings,
   saveTelegramSendLog,
 } from "@/data/admin/storage";
 import type { TelegramBotConfig, TelegramNotificationSettings, TelegramSendLogEntry } from "@/data/admin/types";
-import { loadTelegramSettingsFromShelf, loadTelegramSendLogFromShelf, saveTelegramSendLogToShelf } from "@/lib/adminStorageShelf";
+import {
+  loadTelegramSettingsFromShelf,
+  loadTelegramSendLogFromShelf,
+  saveTelegramSendLogToShelf,
+  saveTelegramSettingsToShelf,
+} from "@/lib/adminStorageShelf";
 
 function enrichBotTokens(settings: TelegramNotificationSettings): TelegramNotificationSettings {
   const envToken = process.env.TELEGRAM_BOT_TOKEN?.trim() ?? "";
@@ -91,10 +97,23 @@ export async function persistTelegramSendLog(entries: TelegramSendLogEntry[]): P
 }
 
 export function settingsDiagnostics(settings: TelegramNotificationSettings) {
+  const supabaseKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || process.env.SUPABASE_SECRET_KEY?.trim();
   return {
     botCount: settings.bots.length,
     enabledBots: settings.bots.filter((b) => b.enabled).length,
     usable: hasUsableBots(settings.bots),
-    shelf: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() && process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()),
+    shelf: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() && supabaseKey),
+    cron: Boolean(process.env.TELEGRAM_BOT_TOKEN?.trim()),
   };
+}
+
+/** Creates data/admin/telegramNotifications.json from env when missing (VPS / first boot). */
+export function bootstrapTelegramSettingsOnStartup(): void {
+  const disk = loadTelegramNotificationSettings();
+  if (disk.bots.length > 0) return;
+  const defaults = enrichBotTokens(defaultSettingsFromEnv());
+  if (!defaults.bots.some((b) => b.token?.trim())) return;
+  saveTelegramNotificationSettings(defaults);
+  void saveTelegramSettingsToShelf(defaults);
 }

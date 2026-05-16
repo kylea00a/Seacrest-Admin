@@ -226,10 +226,9 @@ export default function TelegramNotificationsPage() {
         <div>
           <h1 className="admin-title">Telegram Notifications</h1>
           <p className="admin-muted mt-1 max-w-3xl">
-            Add Telegram bots, chat IDs, send checklist, and Manila-time schedules. After you click Save, schedules run on the
-            server every few minutes (Vercel cron + GitHub Actions) — no one needs to be on the site. The countdown is a preview
-            when this page is open. Bot tokens are saved server-side (and Supabase shelf when configured) and are not shown
-            again after saving.
+            Add Telegram bots, chat IDs, send checklist, and Manila-time schedules. After Save, the server sends automatically
+            at each scheduled time (built-in scheduler runs with the app — no one needs to be on the site). The countdown is a
+            preview when this page is open. Bot tokens are saved on the server and are not shown again after saving.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
