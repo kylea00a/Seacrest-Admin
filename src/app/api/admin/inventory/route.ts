@@ -38,7 +38,6 @@ function sumSupplyByProduct(entries: InventorySupplyEntry[]): Record<string, num
   return inBy;
 }
 
-/** Date part of ISO timestamp for range compare (YYYY-MM-DD). */
 function entryDayKey(at: string): string {
   if (at.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(at)) return at.slice(0, 10);
   try {
@@ -51,7 +50,7 @@ function entryDayKey(at: string): string {
 function sumSupplyByProductInRange(
   entries: InventorySupplyEntry[],
   start: string,
-  end: string
+  end: string,
 ): Record<string, number> {
   const filtered = entries.filter((e) => {
     const k = entryDayKey(e.at);
@@ -63,6 +62,7 @@ function sumSupplyByProductInRange(
 export async function GET(req: Request) {
   const auth = await requireApiPermission(req, "inventory");
   if (auth instanceof NextResponse) return auth;
+
   const url = new URL(req.url);
   let start = url.searchParams.get("start");
   let end = url.searchParams.get("end");
@@ -75,11 +75,19 @@ export async function GET(req: Request) {
     end = t;
   }
 
+  const detailsOnly = url.searchParams.get("details") === "1";
+
+  if (detailsOnly) {
+    const outDetails = await computeClaimedOutDetailsForRange(start, end);
+    return NextResponse.json({ start, end, outDetails });
+  }
+
   const settings = loadAdminSettings();
   const supply = loadInventorySupply();
   const ending = loadInventoryEnding();
-
   const productNames = settings.products.map((p) => p.name);
+  const dayKey = start;
+  const endingRec = ending.byDate?.[dayKey] ?? null;
 
   const getNetForRange = async (rangeStart: string, rangeEnd: string): Promise<Record<string, number>> => {
     const [out, din] = await Promise.all([
@@ -93,34 +101,16 @@ export async function GET(req: Request) {
     return net;
   };
 
-  const dayKey = start;
-  const endingRec = ending.byDate?.[dayKey] ?? null;
+  const deliveryInPeriod = sumSupplyByProductInRange(supply.entries, start, end);
 
-  const [beginningResult, dayMovement] = await Promise.all([
+  const [beginningResult, outPeriod] = await Promise.all([
     resolveBeginningForDay(dayKey, ending.byDate, productNames, getNetForRange),
-    (async () => {
-      let outDetails: Awaited<ReturnType<typeof computeClaimedOutDetailsForRange>> = [];
-      let outPeriod: Record<string, number> = {};
-      if (start === end) {
-        outDetails = await computeClaimedOutDetailsForRange(start, end);
-        for (const o of outDetails) {
-          for (const ln of o.lines) outPeriod[ln.productName] = (outPeriod[ln.productName] ?? 0) + ln.qty;
-        }
-      } else {
-        [outPeriod, outDetails] = await Promise.all([
-          computeClaimedOutTotalsForRange(start, end),
-          computeClaimedOutDetailsForRange(start, end),
-        ]);
-      }
-      const deliveryInPeriod = sumSupplyByProductInRange(supply.entries, start, end);
-      return { outDetails, outPeriod, deliveryInPeriod };
-    })(),
+    computeClaimedOutTotalsForRange(start, end),
   ]);
 
   const { counts: beginningBy, sourceNote: beginningSourceNote } = beginningResult;
-  const { outDetails, outPeriod, deliveryInPeriod } = dayMovement;
-  const allKeys = new Set<string>([...productNames, ...Object.keys(deliveryInPeriod), ...Object.keys(outPeriod)]);
 
+  const allKeys = new Set<string>([...productNames, ...Object.keys(deliveryInPeriod), ...Object.keys(outPeriod)]);
   const rows = [...allKeys].sort((a, b) => a.localeCompare(b)).map((name) => {
     const din = deliveryInPeriod[name] ?? 0;
     const out = outPeriod[name] ?? 0;
@@ -139,7 +129,8 @@ export async function GET(req: Request) {
     })
     .sort((a, b) => b.at.localeCompare(a.at));
 
-  const canEditEncodedEnding = !endingRec?.locked || (auth.isSuperadmin && Boolean(settings.allowSuperadminEditEncodedInventory));
+  const canEditEncodedEnding =
+    !endingRec?.locked || (auth.isSuperadmin && Boolean(settings.allowSuperadminEditEncodedInventory));
 
   const expectedEndingBy: Record<string, number> = {};
   const discrepancyBy: Record<string, number> = {};
@@ -166,7 +157,7 @@ export async function GET(req: Request) {
     productNames,
     rows,
     entries: entriesInPeriod,
-    outDetails,
+    outDetails: [],
     totals: { deliveryIn: totalDeliveryIn, out: totalOut },
     beginningBy,
     beginningSourceNote,

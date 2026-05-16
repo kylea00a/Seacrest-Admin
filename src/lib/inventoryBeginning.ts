@@ -2,8 +2,8 @@ import type { InventoryEndingSnapshot } from "@/data/admin/types";
 
 export type InventoryEndingByDate = Record<string, InventoryEndingSnapshot | undefined>;
 
-/** Max days to roll forward when no encoded ending exists (keeps API fast). */
-const MAX_ROLL_FORWARD_DAYS = 90;
+/** Max calendar days to roll net forward when yesterday is not encoded (keeps API fast). */
+const MAX_ROLL_FORWARD_DAYS = 14;
 
 /** Add calendar days to a YYYY-MM-DD string (UTC date math). */
 export function addDaysYmd(ymd: string, days: number): string {
@@ -77,12 +77,9 @@ export async function resolveBeginningForDay(
   const counts = anchor ? copyCounts(byDate![anchor]!.counts, productNames) : zeroCounts(productNames);
 
   if (!anchor) {
-    const rangeStart = addDaysYmd(targetDay, -MAX_ROLL_FORWARD_DAYS);
-    const net = await getNetForRange(rangeStart, yesterday);
-    applyNetToCounts(counts, productNames, net);
     return {
       counts,
-      sourceNote: `Rolled forward through ${yesterday} (no encoded ending yet)`,
+      sourceNote: "No prior encoded ending (beginning is 0 until you encode a day)",
     };
   }
 
@@ -94,10 +91,17 @@ export async function resolveBeginningForDay(
     };
   }
 
-  const net = await getNetForRange(rangeStart, yesterday);
+  let rangeEnd = yesterday;
+  const cappedEnd = addDaysYmd(rangeStart, MAX_ROLL_FORWARD_DAYS - 1);
+  if (rangeEnd > cappedEnd) rangeEnd = cappedEnd;
+
+  const net = await getNetForRange(rangeStart, rangeEnd);
   applyNetToCounts(counts, productNames, net);
   return {
     counts,
-    sourceNote: `From ${anchor} ending through ${yesterday} (yesterday not encoded)`,
+    sourceNote:
+      rangeEnd < yesterday
+        ? `From ${anchor} through ${rangeEnd} (${MAX_ROLL_FORWARD_DAYS}-day roll cap; encode missing days)`
+        : `From ${anchor} ending through ${yesterday} (yesterday not encoded)`,
   };
 }

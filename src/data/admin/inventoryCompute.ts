@@ -1,8 +1,10 @@
 import { mergeOrderRowWithAdjustment } from "@/data/admin/orderAdjustmentMerge";
 import { readOrdersDayAsync } from "@/data/admin/orders";
-import { calendarYmdInTimeZone, getClaimCalendarYmd, isOrderClaimedForInventory } from "@/data/admin/orderClaim";
+import { calendarYmdInTimeZone, isOrderClaimedForInventory } from "@/data/admin/orderClaim";
 import type { OrderClaimsMap } from "@/data/admin/orderClaim";
+import type { OrderAdjustmentsMap } from "@/data/admin/storage";
 import { loadOrderAdjustments, loadOrderClaims, loadOrdersIndex } from "@/data/admin/storage";
+import { addDaysYmd } from "@/lib/inventoryBeginning";
 
 function fastClaimYmd(invoiceNumber: string, claims: OrderClaimsMap): string | null {
   const rec = claims[invoiceNumber];
@@ -13,39 +15,94 @@ function fastClaimYmd(invoiceNumber: string, claims: OrderClaimsMap): string | n
   return null;
 }
 
+/** Claim calendar day → invoice numbers (built once per range query). */
+function buildClaimsByInventoryYmd(claims: OrderClaimsMap): Map<string, string[]> {
+  const byYmd = new Map<string, string[]>();
+  for (const invoiceNumber of Object.keys(claims)) {
+    const claimYmd = fastClaimYmd(invoiceNumber, claims);
+    if (!claimYmd) continue;
+    const list = byYmd.get(claimYmd);
+    if (list) list.push(invoiceNumber);
+    else byYmd.set(claimYmd, [invoiceNumber]);
+  }
+  return byYmd;
+}
+
+function collectCrossDayClaimInvoices(
+  start: string,
+  end: string,
+  seenInvoices: Set<string>,
+  claimsByYmd: Map<string, string[]>,
+): string[] {
+  const invoicesToLookup: string[] = [];
+  for (let d = start; d <= end; d = addDaysYmd(d, 1)) {
+    const invs = claimsByYmd.get(d);
+    if (!invs) continue;
+    for (const invoiceNumber of invs) {
+      if (seenInvoices.has(invoiceNumber)) continue;
+      invoicesToLookup.push(invoiceNumber);
+    }
+  }
+  return invoicesToLookup;
+}
+
+function matchInvoicesInDayFile(
+  sourceDate: string,
+  dayUnknown: unknown,
+  want: Set<string>,
+  out: Record<string, { sourceDate: string; rec: Record<string, unknown> }>,
+): void {
+  const day = typeof dayUnknown === "object" && dayUnknown !== null ? (dayUnknown as Record<string, unknown>) : null;
+  const parsed = day && typeof day["parsed"] === "object" && day["parsed"] !== null ? (day["parsed"] as Record<string, unknown>) : null;
+  const parsedRows = parsed?.["rows"];
+  if (!Array.isArray(parsedRows)) return;
+
+  for (const r of parsedRows) {
+    if (want.size === 0) break;
+    if (typeof r !== "object" || r === null) continue;
+    const rec = r as Record<string, unknown>;
+    const invoiceNumber = typeof rec["invoiceNumber"] === "string" ? (rec["invoiceNumber"] as string).trim() : "";
+    if (!invoiceNumber || !want.has(invoiceNumber)) continue;
+    out[invoiceNumber] = { sourceDate, rec };
+    want.delete(invoiceNumber);
+  }
+}
+
 async function bulkLookupInvoicesParsedRows(
   invoiceNumbers: string[],
+  adjustments: OrderAdjustmentsMap,
+  indexDates: string[],
 ): Promise<Record<string, { sourceDate: string; rec: Record<string, unknown> }>> {
   const want = new Set(invoiceNumbers.map((x) => x.trim()).filter(Boolean));
   const out: Record<string, { sourceDate: string; rec: Record<string, unknown> }> = {};
   if (want.size === 0) return out;
 
-  const index = loadOrdersIndex();
-  const dates = [...new Set(index.map((i) => i.date))].sort((a, b) => b.localeCompare(a));
+  const bySourceDate = new Map<string, string[]>();
+  for (const inv of want) {
+    const eff = adjustments[inv]?.effectiveDate?.trim();
+    if (eff && /^\d{4}-\d{2}-\d{2}$/.test(eff)) {
+      const list = bySourceDate.get(eff) ?? [];
+      list.push(inv);
+      bySourceDate.set(eff, list);
+    }
+  }
 
+  await Promise.all(
+    [...bySourceDate.entries()].map(async ([sourceDate, invs]) => {
+      const dayUnknown = await readOrdersDayAsync(sourceDate);
+      const localWant = new Set(invs.filter((inv) => want.has(inv)));
+      matchInvoicesInDayFile(sourceDate, dayUnknown, localWant, out);
+      for (const inv of invs) want.delete(inv);
+    }),
+  );
+
+  if (want.size === 0) return out;
+
+  const dates = [...indexDates].sort((a, b) => b.localeCompare(a));
   for (const sourceDate of dates) {
     if (want.size === 0) break;
     const dayUnknown = await readOrdersDayAsync(sourceDate);
-    const day =
-      typeof dayUnknown === "object" && dayUnknown !== null
-        ? (dayUnknown as Record<string, unknown>)
-        : null;
-    const parsed =
-      day && typeof day["parsed"] === "object" && day["parsed"] !== null
-        ? (day["parsed"] as Record<string, unknown>)
-        : null;
-    const parsedRows = parsed?.["rows"];
-    if (!Array.isArray(parsedRows)) continue;
-
-    for (const r of parsedRows) {
-      if (want.size === 0) break;
-      if (typeof r !== "object" || r === null) continue;
-      const rec = r as Record<string, unknown>;
-      const invoiceNumber = typeof rec["invoiceNumber"] === "string" ? (rec["invoiceNumber"] as string).trim() : "";
-      if (!invoiceNumber || !want.has(invoiceNumber)) continue;
-      out[invoiceNumber] = { sourceDate, rec };
-      want.delete(invoiceNumber);
-    }
+    matchInvoicesInDayFile(sourceDate, dayUnknown, want, out);
   }
 
   return out;
@@ -144,14 +201,15 @@ export async function computeClaimedOutTotalsForRange(start: string, end: string
     out[name] = (out[name] ?? 0) + n;
   };
 
-  const indexDates = [...new Set(index.map((i) => i.date))];
-  const datesToScan = indexDates.filter((d) => d >= start && d <= end);
+  const allIndexDates = [...new Set(index.map((i) => i.date))];
+  const datesToScan = allIndexDates.filter((d) => d >= start && d <= end);
+  const claimsByYmd = buildClaimsByInventoryYmd(claims as OrderClaimsMap);
 
   const dayPayloads = await Promise.all(
     datesToScan.map(async (sourceDate) => {
       const dayUnknown = await readOrdersDayAsync(sourceDate);
       return { sourceDate, dayUnknown };
-    })
+    }),
   );
 
   for (const { sourceDate, dayUnknown } of dayPayloads) {
@@ -210,19 +268,10 @@ export async function computeClaimedOutTotalsForRange(start: string, end: string
     }
   }
 
-  // Orders can be claimed on a later day than their import day.
-  // Inventory "Out" for a selected day should include orders whose CLAIM DAY is in [start, end],
-  // even if the source sheet date is outside the window.
-  const claimEntries = Object.entries(claims as OrderClaimsMap);
-  const invoicesToLookup: string[] = [];
-  for (const [invoiceNumber] of claimEntries) {
-    if (seenInvoices.has(invoiceNumber)) continue;
-    const claimYmd = fastClaimYmd(invoiceNumber, claims as OrderClaimsMap);
-    if (!claimYmd || claimYmd < start || claimYmd > end) continue;
-    invoicesToLookup.push(invoiceNumber);
-  }
+  // Orders claimed on a later day than their import day (index by claim day, not full claims scan).
+  const invoicesToLookup = collectCrossDayClaimInvoices(start, end, seenInvoices, claimsByYmd);
 
-  const lookedUp = await bulkLookupInvoicesParsedRows(invoicesToLookup);
+  const lookedUp = await bulkLookupInvoicesParsedRows(invoicesToLookup, adjustments, allIndexDates);
   for (const invoiceNumber of invoicesToLookup) {
     if (seenInvoices.has(invoiceNumber)) continue;
     const claimYmd = fastClaimYmd(invoiceNumber, claims as OrderClaimsMap);
@@ -295,8 +344,9 @@ export async function computeClaimedOutDetailsForRange(
   const out: InventoryOutOrderDetail[] = [];
   const seenInvoices = new Set<string>();
 
-  const indexDates = [...new Set(index.map((i) => i.date))];
-  const datesToScan = indexDates.filter((d) => d >= start && d <= end);
+  const allIndexDates = [...new Set(index.map((i) => i.date))];
+  const datesToScan = allIndexDates.filter((d) => d >= start && d <= end);
+  const claimsByYmd = buildClaimsByInventoryYmd(claims as OrderClaimsMap);
 
   const dayPayloads = await Promise.all(
     datesToScan.map(async (sourceDate) => {
@@ -382,17 +432,9 @@ export async function computeClaimedOutDetailsForRange(
     }
   }
 
-  // Also include orders whose CLAIM DAY is within the window (even if imported earlier).
-  const claimEntries = Object.entries(claims as OrderClaimsMap);
-  const invoicesToLookup: string[] = [];
-  for (const [invoiceNumber] of claimEntries) {
-    if (seenInvoices.has(invoiceNumber)) continue;
-    const claimYmd = fastClaimYmd(invoiceNumber, claims as OrderClaimsMap);
-    if (!claimYmd || claimYmd < start || claimYmd > end) continue;
-    invoicesToLookup.push(invoiceNumber);
-  }
+  const invoicesToLookup = collectCrossDayClaimInvoices(start, end, seenInvoices, claimsByYmd);
 
-  const lookedUp = await bulkLookupInvoicesParsedRows(invoicesToLookup);
+  const lookedUp = await bulkLookupInvoicesParsedRows(invoicesToLookup, adjustments, allIndexDates);
   for (const invoiceNumber of invoicesToLookup) {
     if (seenInvoices.has(invoiceNumber)) continue;
     const claimYmd = fastClaimYmd(invoiceNumber, claims as OrderClaimsMap);

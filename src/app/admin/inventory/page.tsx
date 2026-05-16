@@ -74,6 +74,7 @@ export default function InventoryPage() {
   const [savingEnding, setSavingEnding] = useState(false);
   const [rangeLabel, setRangeLabel] = useState<{ start: string; end: string }>({ start: "", end: "" });
   const [loading, setLoading] = useState(true);
+  const [loadingOutDetails, setLoadingOutDetails] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [productName, setProductName] = useState("");
   const [quantity, setQuantity] = useState("");
@@ -83,9 +84,25 @@ export default function InventoryPage() {
   const [outByOrderDeliveryFilter, setOutByOrderDeliveryFilter] = useState<"All" | "Pickup" | "Delivery">("All");
   const [dayTotals, setDayTotals] = useState<{ deliveryIn: number; out: number } | null>(null);
 
+  const loadOutDetails = useCallback(async (start: string, end: string) => {
+    setLoadingOutDetails(true);
+    try {
+      const qs = new URLSearchParams({ start, end, details: "1" });
+      const res = await fetch(`/api/admin/inventory?${qs.toString()}`, { cache: "no-store" });
+      const json = await safeReadJson<{ outDetails?: OutOrderDetail[]; error?: string }>(res);
+      if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
+      setOutDetails(json.outDetails ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoadingOutDetails(false);
+    }
+  }, []);
+
   const load = useCallback(async () => {
     if (!startDate || !endDate) return;
     setLoading(true);
+    setOutDetails([]);
     setError(null);
     try {
       const qs = new URLSearchParams({ start: startDate, end: endDate });
@@ -93,7 +110,6 @@ export default function InventoryPage() {
       const json = await safeReadJson<{
         rows?: Row[];
         entries?: Entry[];
-        outDetails?: OutOrderDetail[];
         totals?: { deliveryIn: number; out: number };
         productNames?: string[];
         beginningBy?: Record<string, number>;
@@ -109,7 +125,6 @@ export default function InventoryPage() {
       if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
       setRows(json.rows ?? []);
       setEntries(json.entries ?? []);
-      setOutDetails(json.outDetails ?? []);
       setDayTotals(json.totals ?? null);
       setProductNames(json.productNames ?? []);
       setEnding((json.ending ?? null) as EndingSnapshot | null);
@@ -125,12 +140,13 @@ export default function InventoryPage() {
       }
       setEndingDraft(nextDraft);
       if (json.start && json.end) setRangeLabel({ start: json.start, end: json.end });
+      void loadOutDetails(startDate, endDate);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate]);
+  }, [startDate, endDate, loadOutDetails]);
 
   useEffect(() => {
     void load();
@@ -451,6 +467,7 @@ export default function InventoryPage() {
             <div className="text-sm font-semibold text-zinc-200">Out — by order ({dayDescription || "—"})</div>
             <p className="mt-1 text-xs text-zinc-500">
               Each row is a claimed order with effective date on this day. Line types: package, subscription, or repurchase.
+              {loadingOutDetails ? " Loading order breakdown…" : null}
             </p>
           </div>
           <div>
@@ -480,7 +497,13 @@ export default function InventoryPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
-              {filteredOutDetails.length === 0 ? (
+              {loadingOutDetails && outDetails.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-3 text-zinc-500" colSpan={7}>
+                    Loading claimed orders…
+                  </td>
+                </tr>
+              ) : filteredOutDetails.length === 0 ? (
                 <tr>
                   <td className="px-3 py-3 text-zinc-500" colSpan={7}>
                     {outDetails.length === 0
