@@ -286,9 +286,6 @@ export interface OrdersSearchIndexEntry {
   invoice: string;
   sourceDate: string;
   effectiveDate: string;
-  distributorName: string;
-  ordererName: string;
-  shippingFullName: string;
   /** Lowercase normalized invoice + names for substring search. */
   searchBlob: string;
 }

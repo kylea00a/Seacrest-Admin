@@ -17,17 +17,7 @@ import {
 } from "@/data/admin/orderClaim";
 import type { OrderClaimRecord } from "@/data/admin/types";
 import { useAdminSession } from "../AdminSessionContext";
-import { orderMatchesSearch } from "@/lib/orderSearchMatch";
-
-type SearchIndexEntry = {
-  invoice: string;
-  sourceDate: string;
-  effectiveDate: string;
-  distributorName: string;
-  ordererName: string;
-  shippingFullName: string;
-  searchBlob: string;
-};
+const SEARCH_MIN_LEN = 2;
 
 async function safeReadJson<T>(res: Response): Promise<T> {
   const text = await res.text();
@@ -402,9 +392,11 @@ export default function OrdersPage() {
   const [statusFilter, setStatusFilter] = useState<"All" | "Paid" | "Pending" | "Processing" | "Cancelled">("All");
   const [deliveryMethodFilter, setDeliveryMethodFilter] = useState<"All" | "Pickup" | "Delivery">("All");
   const [search, setSearch] = useState("");
-  const [searchIndex, setSearchIndex] = useState<SearchIndexEntry[]>([]);
   const [searchIndexReady, setSearchIndexReady] = useState(false);
+  const [searchIndexCount, setSearchIndexCount] = useState(0);
   const [hydratingSearch, setHydratingSearch] = useState(false);
+  const [searchMatchCount, setSearchMatchCount] = useState<number | null>(null);
+  const [searchTruncated, setSearchTruncated] = useState(false);
   const [pkgProductsOpen, setPkgProductsOpen] = useState(false);
   const [subProductsOpen, setSubProductsOpen] = useState(false);
   const [repProductsOpen, setRepProductsOpen] = useState(false);
@@ -456,20 +448,20 @@ export default function OrdersPage() {
 
   useEffect(() => {
     let cancelled = false;
-    async function loadSearchIndex() {
+    async function loadSearchMeta() {
       try {
         const res = await fetch("/api/admin/orders/search-index", { cache: "no-store" });
-        const json = await safeReadJson<{ entries?: SearchIndexEntry[]; error?: string }>(res);
+        const json = await safeReadJson<{ ready?: boolean; count?: number; error?: string }>(res);
         if (!res.ok) throw new Error(json.error ?? `Search index failed (${res.status})`);
         if (!cancelled) {
-          setSearchIndex(json.entries ?? []);
-          setSearchIndexReady(true);
+          setSearchIndexReady(Boolean(json.ready));
+          setSearchIndexCount(json.count ?? 0);
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
     }
-    void loadSearchIndex();
+    void loadSearchMeta();
     return () => {
       cancelled = true;
     };
@@ -509,63 +501,63 @@ export default function OrdersPage() {
     }
   }, [index.length, startDate, endDate]);
 
-  const hydrateSearchRows = useCallback(async () => {
+  const runServerSearch = useCallback(async () => {
     const q = search.trim();
-    if (!q || !searchIndexReady) return;
-    const keys = searchIndex
-      .filter((e) => orderMatchesSearch(q, e.searchBlob))
-      .slice(0, 1500)
-      .map((e) => ({ invoice: e.invoice, sourceDate: e.sourceDate }));
+    if (!q || q.length < SEARCH_MIN_LEN) return;
 
     setHydratingSearch(true);
     setError(null);
     try {
-      if (keys.length === 0) {
-        setRows([]);
-        setClaims({});
-        return;
-      }
-      const res = await fetch("/api/admin/orders/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keys }),
-        cache: "no-store",
-      });
+      const qs = new URLSearchParams({ q, limit: "100" });
+      const res = await fetch(`/api/admin/orders/search?${qs.toString()}`, { cache: "no-store" });
       const json = await safeReadJson<{
         rows?: Array<ParsedRow & { date: string }>;
         claims?: Record<string, OrderClaimRecord>;
+        matchCount?: number;
+        truncated?: boolean;
+        indexReady?: boolean;
         error?: string;
+        message?: string;
       }>(res);
-      if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
+      if (!res.ok) throw new Error(json.error ?? json.message ?? `Failed with status ${res.status}`);
+      if (json.indexReady === false) {
+        throw new Error(
+          json.error ??
+            "Search index not built. After deploy, wait for index rebuild or contact admin.",
+        );
+      }
       setRows((json.rows ?? []) as Array<ParsedRow & { date: string }>);
       setClaims((json.claims ?? {}) as Record<string, OrderClaimRecord>);
+      setSearchMatchCount(json.matchCount ?? json.rows?.length ?? 0);
+      setSearchTruncated(Boolean(json.truncated));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setHydratingSearch(false);
     }
-  }, [search, searchIndex, searchIndexReady]);
+  }, [search]);
 
   useEffect(() => {
     const q = search.trim();
     if (!q) {
+      setSearchMatchCount(null);
+      setSearchTruncated(false);
       void refetchCompiledRows();
       return;
     }
-    if (!searchIndexReady) return;
+    if (q.length < SEARCH_MIN_LEN) {
+      setRows([]);
+      setSearchMatchCount(null);
+      setSearchTruncated(false);
+      return;
+    }
     const t = window.setTimeout(() => {
-      void hydrateSearchRows();
-    }, 80);
+      void runServerSearch();
+    }, 200);
     return () => window.clearTimeout(t);
-  }, [search, searchIndexReady, refetchCompiledRows, hydrateSearchRows]);
+  }, [search, refetchCompiledRows, runServerSearch]);
 
-  const searchMatchCount = useMemo(() => {
-    const q = search.trim();
-    if (!q || !searchIndexReady) return null;
-    return searchIndex.filter((e) => orderMatchesSearch(q, e.searchBlob)).length;
-  }, [search, searchIndex, searchIndexReady]);
-
-  const isSearchMode = Boolean(search.trim());
+  const isSearchMode = search.trim().length >= SEARCH_MIN_LEN;
 
   const resetClaimDatesApr10 = async () => {
     if (!isSuperadmin || !canFullOrderEdit) return;
@@ -664,7 +656,7 @@ export default function OrdersPage() {
       });
       const json = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
-      if (search.trim()) await hydrateSearchRows();
+      if (search.trim().length >= SEARCH_MIN_LEN) await runServerSearch();
       else await refetchCompiledRows();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -762,7 +754,7 @@ export default function OrdersPage() {
       if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
       setAddOpen(false);
       // Reload current view.
-      if (search.trim()) void hydrateSearchRows();
+      if (search.trim().length >= SEARCH_MIN_LEN) void runServerSearch();
       else void refetchCompiledRows();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -893,7 +885,7 @@ export default function OrdersPage() {
       setBulkSelected({});
       setBulkSelectedRows({});
       // Reload current view.
-      if (search.trim()) void hydrateSearchRows();
+      if (search.trim().length >= SEARCH_MIN_LEN) void runServerSearch();
       else void refetchCompiledRows();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -988,7 +980,7 @@ export default function OrdersPage() {
         delete next[invoiceNumber];
         return next;
       });
-      if (search.trim()) await hydrateSearchRows();
+      if (search.trim().length >= SEARCH_MIN_LEN) await runServerSearch();
       else await refetchCompiledRows();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -1051,7 +1043,7 @@ export default function OrdersPage() {
           <h1 className="admin-title">All Orders (Detailed)</h1>
           <div className="admin-muted">
             Compiled from confirmed uploads. Search matches{" "}
-            <span className="text-zinc-300">invoice or name</span> across all dates instantly. Leave search empty to use
+            <span className="text-zinc-300">invoice or name</span> (2+ characters, all dates). Leave search empty to use
             the date range below.
           </div>
         </div>
@@ -1126,8 +1118,13 @@ export default function OrdersPage() {
             {isSearchMode && searchMatchCount != null ? (
               <>
                 Matches: <span className="font-semibold text-zinc-200">{searchMatchCount}</span>
-                {hydratingSearch ? <span className="ml-2 text-zinc-500">(loading details…)</span> : null}
+                {searchTruncated ? (
+                  <span className="ml-1 text-zinc-500">(showing first 100 — narrow your search)</span>
+                ) : null}
+                {hydratingSearch ? <span className="ml-2 text-zinc-500">(loading…)</span> : null}
               </>
+            ) : isSearchMode && !searchIndexReady ? (
+              <span className="text-amber-300/90">Search index building ({searchIndexCount} indexed)…</span>
             ) : (
               <>
                 Loaded: <span className="font-semibold text-zinc-200">{rows.length}</span>
@@ -1154,10 +1151,8 @@ export default function OrdersPage() {
         </div>
       </div>
 
-      {loading || (isSearchMode && !searchIndexReady) || (isSearchMode && hydratingSearch && rows.length === 0) ? (
-        <div className="mt-4 text-sm text-zinc-300">
-          {isSearchMode && !searchIndexReady ? "Preparing search index…" : "Loading…"}
-        </div>
+      {loading || (isSearchMode && hydratingSearch && rows.length === 0) ? (
+        <div className="mt-4 text-sm text-zinc-300">Loading…</div>
       ) : null}
       {error ? (
         <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">

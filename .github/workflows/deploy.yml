@@ -19,6 +19,7 @@ jobs:
             git pull origin main
             npm install
             npm run build
+            npm run search-index:rebuild
             chmod +x scripts/install-server-telegram-cron.sh
             bash scripts/install-server-telegram-cron.sh
             pm2 delete seacrest-admin 2>/dev/null || true

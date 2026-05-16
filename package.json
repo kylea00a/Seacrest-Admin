@@ -13,7 +13,8 @@
     "git:push": "git push origin main",
     "git:sync": "git pull --rebase origin main && git push origin main",
     "repair:claims": "node scripts/repair-order-claim-dates.mjs",
-    "repair:claims:apply": "node scripts/repair-order-claim-dates.mjs --apply"
+    "repair:claims:apply": "node scripts/repair-order-claim-dates.mjs --apply",
+    "search-index:rebuild": "node scripts/rebuild-orders-search-index.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

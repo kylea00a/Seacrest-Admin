@@ -21,15 +21,15 @@ function entryFromRow(
     invoice,
     sourceDate,
     effectiveDate,
-    distributorName: stringifySearchField(merged["distributorName"]),
-    ordererName: stringifySearchField(merged["ordererName"]),
-    shippingFullName: stringifySearchField(merged["shippingFullName"]),
     searchBlob: buildOrderSearchBlob(merged),
   };
 }
 
-function entriesFromDayPayload(sourceDate: string, dayUnknown: unknown): OrdersSearchIndexEntry[] {
-  const adjustments = loadOrderAdjustments();
+function entriesFromDayPayload(
+  sourceDate: string,
+  dayUnknown: unknown,
+  adjustments: ReturnType<typeof loadOrderAdjustments>,
+): OrdersSearchIndexEntry[] {
   const day =
     typeof dayUnknown === "object" && dayUnknown !== null
       ? (dayUnknown as Record<string, unknown>)
@@ -71,9 +71,10 @@ async function rebuildOrdersSearchIndexForDatesAsync(dates: string[]): Promise<v
     if (!uniq.includes(e.sourceDate)) byInvoice.set(e.invoice, e);
   }
 
+  const adjustments = loadOrderAdjustments();
   const payloads = await Promise.all(uniq.map(async (d) => ({ d, day: await readOrdersDayAsync(d) })));
   for (const { d, day } of payloads) {
-    for (const e of entriesFromDayPayload(d, day)) {
+    for (const e of entriesFromDayPayload(d, day, adjustments)) {
       byInvoice.set(e.invoice, e);
     }
   }
@@ -88,13 +89,14 @@ export async function rebuildOrdersSearchIndexAll(): Promise<number> {
   const index = loadOrdersIndex();
   const dates = mergeIndexAndDiskOrderDates(index.map((i) => i.date));
   const entries: OrdersSearchIndexEntry[] = [];
-  const batchSize = 24;
+  const batchSize = 32;
+  const adjustments = loadOrderAdjustments();
 
   for (let i = 0; i < dates.length; i += batchSize) {
     const batch = dates.slice(i, i + batchSize);
     const payloads = await Promise.all(batch.map((d) => readOrdersDayAsync(d)));
     for (let j = 0; j < batch.length; j++) {
-      entries.push(...entriesFromDayPayload(batch[j]!, payloads[j]));
+      entries.push(...entriesFromDayPayload(batch[j]!, payloads[j], adjustments));
     }
   }
 
@@ -119,9 +121,10 @@ export function rebuildOrdersSearchIndexForDatesSync(dates: string[]): void {
   for (const e of file.entries) {
     if (!uniq.includes(e.sourceDate)) byInvoice.set(e.invoice, e);
   }
+  const adjustments = loadOrderAdjustments();
   for (const d of uniq) {
     const day = readOrdersDay(d);
-    for (const e of entriesFromDayPayload(d, day)) {
+    for (const e of entriesFromDayPayload(d, day, adjustments)) {
       byInvoice.set(e.invoice, e);
     }
   }
