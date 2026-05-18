@@ -52,6 +52,7 @@ const ALL_SECTIONS: DockSection[] = [
     key: "sales",
     label: "Sales",
     links: [
+      { key: "sales-summary", label: "Sales Summary", href: "/admin/sales-summary", perm: "salesReport" },
       { key: "sales-report", label: "Sales Report", href: "/admin/sales-report", perm: "salesReport" },
       {
         key: "seacrest-sales-report",
