@@ -36,6 +36,7 @@ const PETTY_CASH_LEDGER_FILE = path.join(ADMIN_DATA_DIR, "pettyCashLedger.json")
 const SETTINGS_FILE = path.join(ADMIN_DATA_DIR, "settings.json");
 const ORDERS_INDEX_FILE = path.join(ADMIN_DATA_DIR, "ordersIndex.json");
 const ORDERS_SEARCH_INDEX_FILE = path.join(ADMIN_DATA_DIR, "ordersSearchIndex.json");
+const SALES_SUMMARY_CACHE_FILE = path.join(ADMIN_DATA_DIR, "salesSummaryCache.json");
 const DELIVERY_TRACKING_FILE = path.join(ADMIN_DATA_DIR, "deliveryTracking.json");
 const ORDER_ADJUSTMENTS_FILE = path.join(ADMIN_DATA_DIR, "orderAdjustments.json");
 const ORDER_CLAIMS_FILE = path.join(ADMIN_DATA_DIR, "orderClaims.json");
@@ -317,6 +318,41 @@ export function loadOrdersSearchIndex(): OrdersSearchIndexFile {
 
 export function saveOrdersSearchIndex(data: OrdersSearchIndexFile) {
   writeJsonFile(ORDERS_SEARCH_INDEX_FILE, data);
+}
+
+export type SalesSummaryCacheFile = {
+  builtAt: string;
+  salesByDay: Record<string, import("@/lib/salesSummary").DaySalesDetail>;
+  inventoryByClaimDay: Record<string, import("@/data/admin/inventoryCompute").InventoryOutByChannel>;
+};
+
+export function loadSalesSummaryCache(): SalesSummaryCacheFile {
+  const raw = readJsonFile<unknown>(SALES_SUMMARY_CACHE_FILE, {
+    builtAt: "",
+    salesByDay: {},
+    inventoryByClaimDay: {},
+  });
+  if (raw && typeof raw === "object") {
+    const r = raw as SalesSummaryCacheFile;
+    return {
+      builtAt: typeof r.builtAt === "string" ? r.builtAt : "",
+      salesByDay:
+        r.salesByDay && typeof r.salesByDay === "object" && !Array.isArray(r.salesByDay)
+          ? r.salesByDay
+          : {},
+      inventoryByClaimDay:
+        r.inventoryByClaimDay &&
+        typeof r.inventoryByClaimDay === "object" &&
+        !Array.isArray(r.inventoryByClaimDay)
+          ? r.inventoryByClaimDay
+          : {},
+    };
+  }
+  return { builtAt: "", salesByDay: {}, inventoryByClaimDay: {} };
+}
+
+export function saveSalesSummaryCache(data: SalesSummaryCacheFile) {
+  writeJsonFile(SALES_SUMMARY_CACHE_FILE, data);
 }
 
 export type DeliveryTrackingMap = Record<string, { trackingNumber: string; savedAt: string }>;

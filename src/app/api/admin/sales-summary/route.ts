@@ -1,34 +1,35 @@
 import { NextResponse } from "next/server";
-import { computeInventoryOutByClaimDayForRange } from "@/data/admin/inventoryCompute";
+import { sliceSalesSummaryCacheForMonth } from "@/data/admin/salesSummaryCache";
+import { loadSalesSummaryCache } from "@/data/admin/storage";
 import { requireApiPermission } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-export const maxDuration = 120;
 
-function isDateOnly(v: unknown): v is string {
-  return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+function isMonth(v: unknown): v is string {
+  return typeof v === "string" && /^\d{4}-\d{2}$/.test(v);
 }
 
+/** Read prebuilt cache only — never compute here (avoids nginx 502). */
 export async function GET(req: Request) {
   const auth = await requireApiPermission(req, "salesReport");
   if (auth instanceof NextResponse) return auth;
 
   const url = new URL(req.url);
-  const start = url.searchParams.get("start");
-  const end = url.searchParams.get("end");
-  if (!isDateOnly(start) || !isDateOnly(end)) {
-    return NextResponse.json({ error: "Missing/invalid `start` and `end` (YYYY-MM-DD)." }, { status: 400 });
+  const month = url.searchParams.get("month");
+  if (!isMonth(month)) {
+    return NextResponse.json({ error: "Missing/invalid `month` (YYYY-MM)." }, { status: 400 });
   }
 
-  const rangeStart = start <= end ? start : end;
-  const rangeEnd = start <= end ? end : start;
-
-  const inventoryByClaimDay = await computeInventoryOutByClaimDayForRange(rangeStart, rangeEnd);
+  const cache = loadSalesSummaryCache();
+  const ready = Boolean(cache.builtAt) && (Object.keys(cache.salesByDay).length > 0 || Object.keys(cache.inventoryByClaimDay).length > 0);
+  const { salesDays, inventoryByClaimDay } = sliceSalesSummaryCacheForMonth(month);
 
   return NextResponse.json({
-    start: rangeStart,
-    end: rangeEnd,
+    month,
+    builtAt: cache.builtAt || null,
+    ready,
+    salesDays,
     inventoryByClaimDay,
   });
 }

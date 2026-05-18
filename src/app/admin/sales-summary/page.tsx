@@ -1,13 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { AdminSettings } from "@/data/admin/types";
 import type { InventoryOutByChannel } from "@/data/admin/inventoryCompute";
-import {
-  buildDaySalesDetails,
-  monthToRange,
-  type DaySalesDetail,
-} from "@/lib/salesSummary";
+import type { DaySalesDetail } from "@/lib/salesSummary";
 
 function currency(n: number) {
   try {
@@ -34,69 +29,40 @@ async function safeReadJson<T>(res: Response): Promise<T> {
 export default function SalesSummaryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [settings, setSettings] = useState<AdminSettings | null>(null);
+  const [cacheReady, setCacheReady] = useState(false);
+  const [builtAt, setBuiltAt] = useState<string | null>(null);
   const [month, setMonth] = useState("");
-  const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
-  const [deliveryFeeOthersByDay, setDeliveryFeeOthersByDay] = useState<Record<string, number>>({});
+  const [dayDetails, setDayDetails] = useState<DaySalesDetail[]>([]);
   const [inventoryByClaimDay, setInventoryByClaimDay] = useState<Record<string, InventoryOutByChannel>>({});
   const [selectedDay, setSelectedDay] = useState("");
 
   useEffect(() => {
-    let cancelled = false;
-    async function init() {
-      try {
-        const today = new Date();
-        const mm = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
-        const sRes = await fetch("/api/admin/settings", { cache: "no-store" });
-        const sJson = await safeReadJson<{ settings?: AdminSettings; error?: string }>(sRes);
-        if (!sRes.ok) throw new Error(sJson.error ?? `Failed (${sRes.status})`);
-        if (!cancelled) {
-          setSettings(sJson.settings ?? null);
-          setMonth(mm);
-        }
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      }
-    }
-    void init();
-    return () => {
-      cancelled = true;
-    };
+    const today = new Date();
+    setMonth(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`);
   }, []);
 
   useEffect(() => {
-    const range = monthToRange(month);
-    if (!range) {
-      setLoading(false);
-      return;
-    }
-    const { start, end } = range;
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) return;
 
     let cancelled = false;
     async function load() {
       setLoading(true);
       setError(null);
       try {
-        const [compiledRes, otherRes, invRes] = await Promise.all([
-          fetch(`/api/admin/orders/compiled?start=${start}&end=${end}`, { cache: "no-store" }),
-          fetch(`/api/admin/sales-report/delivery-fee-others?start=${start}&end=${end}`, {
-            cache: "no-store",
-          }),
-          fetch(`/api/admin/sales-summary?start=${start}&end=${end}`, { cache: "no-store" }),
-        ]);
-        const compiled = await safeReadJson<{ rows?: Array<Record<string, unknown>>; error?: string }>(compiledRes);
-        const other = await safeReadJson<{ byDay?: Record<string, number>; error?: string }>(otherRes);
-        const inv = await safeReadJson<{
+        const res = await fetch(`/api/admin/sales-summary?month=${month}`, { cache: "no-store" });
+        const json = await safeReadJson<{
+          salesDays?: DaySalesDetail[];
           inventoryByClaimDay?: Record<string, InventoryOutByChannel>;
+          ready?: boolean;
+          builtAt?: string | null;
           error?: string;
-        }>(invRes);
-        if (!compiledRes.ok) throw new Error(compiled.error ?? `Compiled failed (${compiledRes.status})`);
-        if (!otherRes.ok) throw new Error(other.error ?? `Delivery fee others failed (${otherRes.status})`);
-        if (!invRes.ok) throw new Error(inv.error ?? `Inventory summary failed (${invRes.status})`);
+        }>(res);
+        if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
         if (cancelled) return;
-        setRows(compiled.rows ?? []);
-        setDeliveryFeeOthersByDay(other.byDay ?? {});
-        setInventoryByClaimDay(inv.inventoryByClaimDay ?? {});
+        setDayDetails(json.salesDays ?? []);
+        setInventoryByClaimDay(json.inventoryByClaimDay ?? {});
+        setCacheReady(Boolean(json.ready));
+        setBuiltAt(json.builtAt ?? null);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -108,13 +74,6 @@ export default function SalesSummaryPage() {
       cancelled = true;
     };
   }, [month]);
-
-  const range = monthToRange(month);
-
-  const dayDetails = useMemo(() => {
-    if (!range) return [];
-    return buildDaySalesDetails(rows, range, settings, deliveryFeeOthersByDay);
-  }, [rows, range, settings, deliveryFeeOthersByDay]);
 
   useEffect(() => {
     if (dayDetails.length === 0) {
@@ -157,6 +116,15 @@ export default function SalesSummaryPage() {
         inventory <strong>out</strong> (pieces claimed) by product, split <strong>Pick up</strong> vs{" "}
         <strong>Delivery</strong> (by claim date).
       </p>
+      {!loading && !cacheReady ? (
+        <div className="admin-alert-error mt-4 text-sm">
+          Summary cache is not built yet. After deploy, run{" "}
+          <code className="text-emerald-200">npm run sales-summary-cache:rebuild</code> on the server.
+        </div>
+      ) : null}
+      {builtAt ? (
+        <p className="mt-2 text-xs text-zinc-500">Cache updated {new Date(builtAt).toLocaleString()}</p>
+      ) : null}
 
       <div className="mt-4 flex flex-wrap items-end gap-3">
         <div>

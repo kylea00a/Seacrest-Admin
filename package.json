@@ -14,7 +14,8 @@
     "git:sync": "git pull --rebase origin main && git push origin main",
     "repair:claims": "node scripts/repair-order-claim-dates.mjs",
     "repair:claims:apply": "node scripts/repair-order-claim-dates.mjs --apply",
-    "search-index:rebuild": "node scripts/rebuild-orders-search-index.mjs"
+    "search-index:rebuild": "node scripts/rebuild-orders-search-index.mjs",
+    "sales-summary-cache:rebuild": "npx tsx scripts/rebuild-sales-summary-cache.ts"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
@@ -45,6 +46,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
+    "tsx": "^4.19.4",
     "typescript": "^5",
     "vercel": "^50.15.1"
   }
