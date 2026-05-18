@@ -3,7 +3,6 @@ import { buildBulkSummaryForDay, buildDayParsedFromIndices } from "@/data/admin/
 import type { OrdersDayParsed } from "@/data/admin/ordersParse";
 import { deleteOrdersStaging, readOrdersStaging, saveOrdersDay, upsertOrdersIndex } from "@/data/admin/orders";
 import { rebuildOrdersSearchIndexForDatesSync } from "@/data/admin/ordersSearchIndex";
-import { scheduleSalesSummaryCacheRebuild } from "@/data/admin/salesSummaryCache";
 import { productNamesFromSettings } from "@/data/admin/productSettings";
 import { loadAdminSettings } from "@/data/admin/storage";
 import type { OrdersImportSummary } from "@/data/admin/types";
@@ -57,7 +56,6 @@ export async function POST(req: Request) {
     }
 
     rebuildOrdersSearchIndexForDatesSync(groups.map((g) => g.date));
-    scheduleSalesSummaryCacheRebuild();
     deleteOrdersStaging(token);
     return NextResponse.json({ bulk: true, summaries, count: summaries.length });
   }
@@ -77,7 +75,6 @@ export async function POST(req: Request) {
   saveOrdersDay(date, { summary, sheetName, parsed });
   upsertOrdersIndex(summary);
   rebuildOrdersSearchIndexForDatesSync([date]);
-  scheduleSalesSummaryCacheRebuild();
   deleteOrdersStaging(token);
 
   return NextResponse.json({ summary });

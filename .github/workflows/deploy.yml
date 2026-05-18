@@ -20,7 +20,7 @@ jobs:
             npm install
             npm run build
             npm run search-index:rebuild
-            npm run sales-summary-cache:rebuild
+            NODE_OPTIONS=--max-old-space-size=2048 npm run sales-summary-cache:rebuild
             chmod +x scripts/install-server-telegram-cron.sh
             bash scripts/install-server-telegram-cron.sh
             pm2 delete seacrest-admin 2>/dev/null || true

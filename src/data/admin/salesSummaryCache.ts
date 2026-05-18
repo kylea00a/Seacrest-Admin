@@ -1,10 +1,13 @@
 import { mergeOrderRowWithAdjustment } from "@/data/admin/orderAdjustmentMerge";
 import type { InventoryOutByChannel } from "@/data/admin/inventoryCompute";
-import { computeInventoryOutByClaimDayForRange } from "@/data/admin/inventoryCompute";
+import {
+  accumulateInventoryOutByClaimRow,
+  fillMissingInventoryOutCrossDayClaims,
+} from "@/data/admin/inventoryCompute";
 import { resolvePackageNameFromPrice } from "@/data/admin/packageResolve";
-import { readOrdersDayAsync } from "@/data/admin/orders";
-import { mergeIndexAndDiskOrderDates } from "@/data/admin/orders";
+import { mergeIndexAndDiskOrderDates, readOrdersDayAsync } from "@/data/admin/orders";
 import { getClaimCalendarYmd } from "@/data/admin/orderClaim";
+import type { OrderClaimsMap } from "@/data/admin/orderClaim";
 import {
   loadAdminSettings,
   loadOrderAdjustments,
@@ -14,16 +17,13 @@ import {
   saveSalesSummaryCache,
   type SalesSummaryCacheFile,
 } from "@/data/admin/storage";
-import { buildDaySalesDetails, type DaySalesDetail } from "@/lib/salesSummary";
-
-function paidFromStatus(status: string): boolean {
-  const s = (status ?? "").toLowerCase();
-  if (!s) return false;
-  if (s.includes("cancel")) return false;
-  if (s.includes("paid")) return true;
-  if (s.includes("complete")) return true;
-  return false;
-}
+import type { OrderAdjustmentsMap } from "@/data/admin/storage";
+import {
+  accumulateSalesSummaryRow,
+  createSalesSummaryAccumulator,
+  finalizeSalesSummaryAccumulator,
+  type DaySalesDetail,
+} from "@/lib/salesSummary";
 
 function parsePrice(v: unknown): number {
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -41,67 +41,6 @@ function priceFromPackageCode(packageName: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** All compiled order rows (for offline cache build). */
-export async function compileAllOrdersRows(): Promise<Array<Record<string, unknown>>> {
-  const index = loadOrdersIndex();
-  const dates = mergeIndexAndDiskOrderDates(index.map((i) => i.date));
-  const adjustments = loadOrderAdjustments();
-  const packages = loadAdminSettings().packages;
-  const rows: Array<Record<string, unknown>> = [];
-
-  const batchSize = 32;
-  for (let i = 0; i < dates.length; i += batchSize) {
-    const batch = dates.slice(i, i + batchSize);
-    const payloads = await Promise.all(batch.map((d) => readOrdersDayAsync(d)));
-    for (let j = 0; j < batch.length; j++) {
-      const sourceDate = batch[j]!;
-      const dayUnknown = payloads[j];
-      const day =
-        typeof dayUnknown === "object" && dayUnknown !== null
-          ? (dayUnknown as Record<string, unknown>)
-          : null;
-      const parsed =
-        day && typeof day["parsed"] === "object" && day["parsed"] !== null
-          ? (day["parsed"] as Record<string, unknown>)
-          : null;
-      const parsedRows = parsed?.["rows"];
-      if (!Array.isArray(parsedRows)) continue;
-
-      for (const r of parsedRows) {
-        if (typeof r !== "object" || r === null) continue;
-        const rec = r as Record<string, unknown>;
-        const invoiceNumber = typeof rec["invoiceNumber"] === "string" ? rec["invoiceNumber"].trim() : "";
-        if (!invoiceNumber) continue;
-
-        const adj = adjustments[invoiceNumber];
-        const mergedRec = mergeOrderRowWithAdjustment(rec, adj);
-        const effectiveDate = adj?.effectiveDate ?? sourceDate;
-        const status = adj?.status ?? (typeof mergedRec["status"] === "string" ? (mergedRec["status"] as string) : "");
-        const packageNameRaw =
-          typeof mergedRec["packageName"] === "string" ? (mergedRec["packageName"] as string).trim() : "";
-        const pkgPriceFromRow = parsePrice(mergedRec["packagePrice"]);
-        const pkgPriceFromCode = priceFromPackageCode(packageNameRaw);
-        const packagePrice = pkgPriceFromRow || pkgPriceFromCode;
-        const resolvedPackageName = resolvePackageNameFromPrice(packagePrice, packages);
-        const packageName = resolvedPackageName || packageNameRaw;
-
-        rows.push({
-          ...mergedRec,
-          packagePrice,
-          packageName,
-          date: effectiveDate,
-          sourceDate,
-          status,
-          isPaid: paidFromStatus(status),
-          adjusted: !!adj,
-        });
-      }
-    }
-  }
-
-  return rows;
-}
-
 function buildDeliveryFeeOthersAll(): Record<string, number> {
   const adjustments = loadOrderAdjustments();
   const claims = loadOrderClaims();
@@ -116,57 +55,118 @@ function buildDeliveryFeeOthersAll(): Record<string, number> {
   return byDay;
 }
 
-function minMaxYmd(keys: string[]): { min: string; max: string } | null {
-  const valid = keys.filter((k) => /^\d{4}-\d{2}-\d{2}$/.test(k));
-  if (valid.length === 0) return null;
-  valid.sort();
-  return { min: valid[0]!, max: valid[valid.length - 1]! };
+function processOrderDayFile(
+  sourceDate: string,
+  dayUnknown: unknown,
+  packages: ReturnType<typeof loadAdminSettings>["packages"],
+  adjustments: OrderAdjustmentsMap,
+  claims: OrderClaimsMap,
+  salesAcc: ReturnType<typeof createSalesSummaryAccumulator>,
+  inventoryByClaimDay: Record<string, InventoryOutByChannel>,
+  seenInvoices: Set<string>,
+): void {
+  const day =
+    typeof dayUnknown === "object" && dayUnknown !== null
+      ? (dayUnknown as Record<string, unknown>)
+      : null;
+  const parsed =
+    day && typeof day["parsed"] === "object" && day["parsed"] !== null
+      ? (day["parsed"] as Record<string, unknown>)
+      : null;
+  const parsedRows = parsed?.["rows"];
+  if (!Array.isArray(parsedRows)) return;
+
+  for (const r of parsedRows) {
+    if (typeof r !== "object" || r === null) continue;
+    const rec = r as Record<string, unknown>;
+    const invoiceNumber = typeof rec["invoiceNumber"] === "string" ? rec["invoiceNumber"].trim() : "";
+    if (!invoiceNumber) continue;
+
+    const adj = adjustments[invoiceNumber];
+    const mergedRec = mergeOrderRowWithAdjustment(rec, adj);
+    const effectiveDate = adj?.effectiveDate ?? sourceDate;
+    const status = adj?.status ?? (typeof mergedRec["status"] === "string" ? (mergedRec["status"] as string) : "");
+    const packageNameRaw =
+      typeof mergedRec["packageName"] === "string" ? (mergedRec["packageName"] as string).trim() : "";
+    const pkgPriceFromRow = parsePrice(mergedRec["packagePrice"]);
+    const pkgPriceFromCode = priceFromPackageCode(packageNameRaw);
+    const packagePrice = pkgPriceFromRow || pkgPriceFromCode;
+    const resolvedPackageName = resolvePackageNameFromPrice(packagePrice, packages);
+    const packageName = resolvedPackageName || packageNameRaw;
+
+    accumulateSalesSummaryRow(salesAcc, {
+      date: effectiveDate,
+      status,
+      deliveryFee: mergedRec["deliveryFee"],
+      packagePrice,
+      packageName,
+      subscriptionsCount: mergedRec["subscriptionsCount"],
+      repurchaseProducts: mergedRec["repurchaseProducts"],
+    });
+
+    accumulateInventoryOutByClaimRow(
+      inventoryByClaimDay,
+      seenInvoices,
+      rec,
+      sourceDate,
+      invoiceNumber,
+      adjustments,
+      claims,
+    );
+  }
 }
 
-function salesByDayFromDetails(details: DaySalesDetail[]): Record<string, DaySalesDetail> {
-  const out: Record<string, DaySalesDetail> = {};
-  for (const d of details) out[d.date] = d;
-  return out;
-}
-
-/** Full offline rebuild (deploy script / explicit API). */
+/** Full offline rebuild — one order day file at a time (low memory). */
 export async function rebuildSalesSummaryCacheAll(): Promise<SalesSummaryCacheFile> {
-  const rows = await compileAllOrdersRows();
   const settings = loadAdminSettings();
+  const adjustments = loadOrderAdjustments();
+  const claims = loadOrderClaims() as OrderClaimsMap;
   const deliveryFeeOthersByDay = buildDeliveryFeeOthersAll();
+  const salesAcc = createSalesSummaryAccumulator(settings);
+  const inventoryByClaimDay: Record<string, InventoryOutByChannel> = {};
+  const seenInvoices = new Set<string>();
 
-  const salesDates = rows
-    .map((r) => String(r["date"] ?? "").slice(0, 10))
-    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
-  const salesSpan = minMaxYmd(salesDates);
-  const claimSpan = minMaxYmd(Object.keys(deliveryFeeOthersByDay));
+  const index = loadOrdersIndex();
+  const dates = mergeIndexAndDiskOrderDates(index.map((i) => i.date));
+  const total = dates.length;
 
-  if (!salesSpan && !claimSpan) {
-    const empty: SalesSummaryCacheFile = {
-      builtAt: new Date().toISOString(),
-      salesByDay: {},
-      inventoryByClaimDay: {},
-    };
-    saveSalesSummaryCache(empty);
-    return empty;
+  for (let i = 0; i < dates.length; i++) {
+    const sourceDate = dates[i]!;
+    const dayUnknown = await readOrdersDayAsync(sourceDate);
+    processOrderDayFile(
+      sourceDate,
+      dayUnknown,
+      settings.packages,
+      adjustments,
+      claims,
+      salesAcc,
+      inventoryByClaimDay,
+      seenInvoices,
+    );
+    if ((i + 1) % 40 === 0 || i + 1 === total) {
+      console.log(`[sales-summary-cache] …${i + 1} / ${total} day files`);
+    }
   }
 
-  let rangeStart = salesSpan?.min ?? claimSpan!.min;
-  let rangeEnd = salesSpan?.max ?? claimSpan!.max;
-  for (const span of [salesSpan, claimSpan]) {
-    if (!span) continue;
-    if (span.min < rangeStart) rangeStart = span.min;
-    if (span.max > rangeEnd) rangeEnd = span.max;
-  }
+  const salesByDay = finalizeSalesSummaryAccumulator(salesAcc, deliveryFeeOthersByDay);
 
-  const details = buildDaySalesDetails(
-    rows,
-    { start: rangeStart, end: rangeEnd },
-    settings,
-    deliveryFeeOthersByDay,
-  );
-  const salesByDay = salesByDayFromDetails(details);
-  const inventoryByClaimDay = await computeInventoryOutByClaimDayForRange(rangeStart, rangeEnd);
+  const dateKeys = [
+    ...Object.keys(salesByDay),
+    ...Object.keys(deliveryFeeOthersByDay),
+    ...Object.keys(claims).map((inv) => getClaimCalendarYmd(inv, claims)).filter((d): d is string => !!d),
+  ];
+  if (dateKeys.length > 0) {
+    dateKeys.sort();
+    const rangeStart = dateKeys[0]!;
+    const rangeEnd = dateKeys[dateKeys.length - 1]!;
+    console.log("[sales-summary-cache] Cross-day claim lookup…");
+    await fillMissingInventoryOutCrossDayClaims(
+      inventoryByClaimDay,
+      seenInvoices,
+      rangeStart,
+      rangeEnd,
+    );
+  }
 
   const file: SalesSummaryCacheFile = {
     builtAt: new Date().toISOString(),
