@@ -2,7 +2,7 @@ import { mergeOrderRowWithAdjustment } from "@/data/admin/orderAdjustmentMerge";
 import type { InventoryOutByChannel } from "@/data/admin/inventoryCompute";
 import {
   accumulateInventoryOutByClaimRow,
-  fillMissingInventoryOutCrossDayClaims,
+  fillMissingInventoryOutFromClaims,
 } from "@/data/admin/inventoryCompute";
 import { resolvePackageNameFromPrice } from "@/data/admin/packageResolve";
 import { mergeIndexAndDiskOrderDates, readOrdersDayAsync } from "@/data/admin/orders";
@@ -150,22 +150,10 @@ export async function rebuildSalesSummaryCacheAll(): Promise<SalesSummaryCacheFi
 
   const salesByDay = finalizeSalesSummaryAccumulator(salesAcc, deliveryFeeOthersByDay);
 
-  const dateKeys = [
-    ...Object.keys(salesByDay),
-    ...Object.keys(deliveryFeeOthersByDay),
-    ...Object.keys(claims).map((inv) => getClaimCalendarYmd(inv, claims)).filter((d): d is string => !!d),
-  ];
-  if (dateKeys.length > 0) {
-    dateKeys.sort();
-    const rangeStart = dateKeys[0]!;
-    const rangeEnd = dateKeys[dateKeys.length - 1]!;
-    console.log("[sales-summary-cache] Cross-day claim lookup…");
-    await fillMissingInventoryOutCrossDayClaims(
-      inventoryByClaimDay,
-      seenInvoices,
-      rangeStart,
-      rangeEnd,
-    );
+  const orphanClaims = Object.keys(claims).filter((inv) => !seenInvoices.has(inv)).length;
+  if (orphanClaims > 0) {
+    console.log(`[sales-summary-cache] Resolving ${orphanClaims} orphan claim(s)…`);
+    await fillMissingInventoryOutFromClaims(inventoryByClaimDay, seenInvoices);
   }
 
   const file: SalesSummaryCacheFile = {

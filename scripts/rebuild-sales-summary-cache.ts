@@ -11,7 +11,7 @@ async function main() {
   const salesDays = Object.keys(file.salesByDay).length;
   const claimDays = Object.keys(file.inventoryByClaimDay).length;
   console.log(
-    `[sales-summary-cache] Done: ${salesDays} sales days, ${claimDays} claim days in ${((Date.now() - started) / 1000).toFixed(1)}s`,
+    `[sales-summary-cache] Done: ${salesDays} sales days, ${claimDays} claim days in ${((Date.now() - started) / 1000).toFixed(1)}s → data/admin/salesSummaryCache.json`,
   );
 }
 

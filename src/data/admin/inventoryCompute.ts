@@ -40,9 +40,8 @@ function collectCrossDayClaimInvoices(
   claimsByYmd: Map<string, string[]>,
 ): string[] {
   const invoicesToLookup: string[] = [];
-  for (let d = start; d <= end; d = addDaysYmd(d, 1)) {
-    const invs = claimsByYmd.get(d);
-    if (!invs) continue;
+  for (const [d, invs] of claimsByYmd) {
+    if (d < start || d > end) continue;
     for (const invoiceNumber of invs) {
       if (seenInvoices.has(invoiceNumber)) continue;
       invoicesToLookup.push(invoiceNumber);
@@ -633,23 +632,23 @@ export async function computeInventoryOutByClaimDayForRange(
   return byDay;
 }
 
-/** Orders claimed on a calendar day but living in another import file (after main scan). */
-export async function fillMissingInventoryOutCrossDayClaims(
+/**
+ * After a full order-file scan, resolve claimed invoices not yet counted (orphans only).
+ * Skips the old day-by-day calendar walk — that could re-read hundreds of files.
+ */
+export async function fillMissingInventoryOutFromClaims(
   byDay: Record<string, InventoryOutByChannel>,
   seenInvoices: Set<string>,
-  start: string,
-  end: string,
 ): Promise<void> {
   const index = loadOrdersIndex();
   const adjustments = loadOrderAdjustments();
   const claims = loadOrderClaims() as OrderClaimsMap;
-  const allIndexDates = [...new Set(index.map((i) => i.date))];
-  const claimsByYmd = buildClaimsByInventoryYmd(claims);
-  const range = { start, end };
+  const missing = Object.keys(claims).filter((inv) => !seenInvoices.has(inv));
+  if (missing.length === 0) return;
 
-  const invoicesToLookup = collectCrossDayClaimInvoices(start, end, seenInvoices, claimsByYmd);
-  const lookedUp = await bulkLookupInvoicesParsedRows(invoicesToLookup, adjustments, allIndexDates);
-  for (const invoiceNumber of invoicesToLookup) {
+  const allIndexDates = [...new Set(index.map((i) => i.date))];
+  const lookedUp = await bulkLookupInvoicesParsedRows(missing, adjustments, allIndexDates);
+  for (const invoiceNumber of missing) {
     if (seenInvoices.has(invoiceNumber)) continue;
     const found = lookedUp[invoiceNumber];
     if (!found) continue;
@@ -661,7 +660,6 @@ export async function fillMissingInventoryOutCrossDayClaims(
       invoiceNumber,
       adjustments,
       claims,
-      range,
     );
   }
 }
