@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { format, startOfDay } from "date-fns";
 import { isNonPickupDelivery, isPickupDelivery } from "@/data/admin/orderClaim";
 import InventoryDayPicker from "../_components/InventoryDayPicker";
+import { useAdminSession } from "../AdminSessionContext";
 
 async function safeReadJson<T>(res: Response): Promise<T> {
   const text = await res.text();
@@ -54,6 +55,9 @@ type EndingSnapshot = {
 };
 
 export default function InventoryPage() {
+  const { can } = useAdminSession();
+  const canEditDeliveryLedger = can("inventoryDeliveryLedger");
+
   const [pickDay, setPickDay] = useState<Date | undefined>(() => startOfDay(new Date()));
 
   const { startDate, endDate } = useMemo(() => {
@@ -81,6 +85,12 @@ export default function InventoryPage() {
   const [quantity, setQuantity] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const [editProduct, setEditProduct] = useState("");
+  const [editQuantity, setEditQuantity] = useState("");
+  const [editNote, setEditNote] = useState("");
+  const [savingLedgerEdit, setSavingLedgerEdit] = useState(false);
+  const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null);
   const [outDetails, setOutDetails] = useState<OutOrderDetail[]>([]);
   const [outByOrderDeliveryFilter, setOutByOrderDeliveryFilter] = useState<"All" | "Pickup" | "Delivery">("All");
   const [dayTotals, setDayTotals] = useState<{ deliveryIn: number; rtsIn: number; out: number } | null>(null);
@@ -99,6 +109,13 @@ export default function InventoryPage() {
       setLoadingOutDetails(false);
     }
   }, []);
+
+  useEffect(() => {
+    setEditingEntryId(null);
+    setEditProduct("");
+    setEditQuantity("");
+    setEditNote("");
+  }, [startDate, endDate]);
 
   const load = useCallback(async () => {
     if (!startDate || !endDate) return;
@@ -182,6 +199,71 @@ export default function InventoryPage() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const startEditEntry = (e: Entry) => {
+    setEditingEntryId(e.id);
+    setEditProduct(e.productName);
+    setEditQuantity(String(e.quantity));
+    setEditNote(e.note ?? "");
+    setError(null);
+  };
+
+  const cancelEditEntry = () => {
+    setEditingEntryId(null);
+    setEditProduct("");
+    setEditQuantity("");
+    setEditNote("");
+  };
+
+  const saveLedgerEntry = async () => {
+    if (!editingEntryId) return;
+    const q = Number(editQuantity);
+    if (!editProduct.trim() || !Number.isFinite(q) || q <= 0) {
+      setError("Choose a product and enter a positive quantity.");
+      return;
+    }
+    setSavingLedgerEdit(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/inventory", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: editingEntryId,
+          productName: editProduct.trim(),
+          quantity: q,
+          note: editNote.trim() ? editNote.trim() : null,
+        }),
+      });
+      const json = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
+      cancelEditEntry();
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingLedgerEdit(false);
+    }
+  };
+
+  const deleteLedgerEntry = async (id: string) => {
+    if (!window.confirm("Delete this delivery-in ledger row? Inventory flow will be recalculated for this day.")) {
+      return;
+    }
+    setDeletingEntryId(id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/inventory?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      const json = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
+      if (editingEntryId === id) cancelEditEntry();
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeletingEntryId(null);
     }
   };
 
@@ -553,7 +635,16 @@ export default function InventoryPage() {
         <div className="text-sm font-semibold text-zinc-200">
           Delivery in ledger ({dayDescription || "—"})
         </div>
-        <p className="mt-1 text-xs text-zinc-500">Stock entries saved on the selected day (by date).</p>
+        <p className="mt-1 text-xs text-zinc-500">
+          Stock entries saved on the selected day (by date).
+          {canEditDeliveryLedger ? (
+            <span className="text-zinc-400">
+              {" "}
+              Users with <strong className="text-zinc-300">Inventory — edit/delete delivery-in ledger</strong> in
+              Accounts can correct or remove rows.
+            </span>
+          ) : null}
+        </p>
         <div className="admin-table-wrap mt-2 max-h-80 overflow-auto">
           <table className="min-w-full text-xs">
             <thead className="sticky top-0 bg-black/40 text-zinc-300">
@@ -562,26 +653,108 @@ export default function InventoryPage() {
                 <th className="px-3 py-2 text-left">Product</th>
                 <th className="px-3 py-2 text-right">Qty</th>
                 <th className="px-3 py-2 text-left">Note</th>
+                {canEditDeliveryLedger ? (
+                  <th className="px-3 py-2 text-right whitespace-nowrap">Actions</th>
+                ) : null}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
               {entries.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-3 text-zinc-500" colSpan={4}>
+                  <td className="px-3 py-3 text-zinc-500" colSpan={canEditDeliveryLedger ? 5 : 4}>
                     No delivery in entries on this day.
                   </td>
                 </tr>
               ) : (
-                entries.map((e) => (
-                  <tr key={e.id} className="bg-black/10 text-zinc-100">
-                    <td className="px-3 py-2 whitespace-nowrap text-zinc-400">
-                      {new Date(e.at).toLocaleString()}
-                    </td>
-                    <td className="px-3 py-2">{e.productName}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{e.quantity}</td>
-                    <td className="px-3 py-2 text-zinc-400">{e.note ?? "—"}</td>
-                  </tr>
-                ))
+                entries.map((e) => {
+                  const isEditing = editingEntryId === e.id;
+                  return (
+                    <tr key={e.id} className="bg-black/10 text-zinc-100">
+                      <td className="px-3 py-2 whitespace-nowrap text-zinc-400">
+                        {new Date(e.at).toLocaleString()}
+                      </td>
+                      {isEditing ? (
+                        <>
+                          <td className="px-3 py-2">
+                            <select
+                              value={editProduct}
+                              onChange={(ev) => setEditProduct(ev.target.value)}
+                              className="admin-select w-full min-w-[10rem]"
+                            >
+                              {productNames.map((p) => (
+                                <option key={p} value={p}>
+                                  {p}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <input
+                              type="number"
+                              min={0.01}
+                              step="any"
+                              value={editQuantity}
+                              onChange={(ev) => setEditQuantity(ev.target.value)}
+                              className="admin-input w-24 text-right tabular-nums"
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input
+                              value={editNote}
+                              onChange={(ev) => setEditNote(ev.target.value)}
+                              className="admin-input w-full min-w-[8rem]"
+                              placeholder="Note…"
+                            />
+                          </td>
+                          <td className="px-3 py-2 text-right whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => void saveLedgerEntry()}
+                              disabled={savingLedgerEdit}
+                              className="admin-btn-primary px-2 py-1 text-[11px]"
+                            >
+                              {savingLedgerEdit ? "Saving…" : "Save"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={cancelEditEntry}
+                              disabled={savingLedgerEdit}
+                              className="admin-btn-secondary ml-1 px-2 py-1 text-[11px]"
+                            >
+                              Cancel
+                            </button>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-3 py-2">{e.productName}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{e.quantity}</td>
+                          <td className="px-3 py-2 text-zinc-400">{e.note ?? "—"}</td>
+                          {canEditDeliveryLedger ? (
+                            <td className="px-3 py-2 text-right whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => startEditEntry(e)}
+                                disabled={deletingEntryId !== null || editingEntryId !== null}
+                                className="text-sky-400 hover:underline disabled:opacity-40"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void deleteLedgerEntry(e.id)}
+                                disabled={deletingEntryId !== null || editingEntryId !== null}
+                                className="ml-2 text-rose-400 hover:underline disabled:opacity-40"
+                              >
+                                {deletingEntryId === e.id ? "…" : "Delete"}
+                              </button>
+                            </td>
+                          ) : null}
+                        </>
+                      )}
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

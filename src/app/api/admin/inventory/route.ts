@@ -10,6 +10,7 @@ import {
 } from "@/data/admin/storage";
 import type { InventoryEndingSnapshot } from "@/data/admin/types";
 import type { InventorySupplyEntry } from "@/data/admin/types";
+import { accountHasPermission } from "@/data/admin/accountsStore";
 import { requireApiPermission } from "@/lib/adminApiAuth";
 import {
   getInventoryFlowRow,
@@ -46,6 +47,7 @@ function entryDayKey(at: string): string {
 export async function GET(req: Request) {
   const auth = await requireApiPermission(req, "inventory");
   if (auth instanceof NextResponse) return auth;
+  const canEditDeliveryLedger = accountHasPermission(auth, "inventoryDeliveryLedger");
 
   const url = new URL(req.url);
   let start = url.searchParams.get("start");
@@ -144,6 +146,7 @@ export async function GET(req: Request) {
     beginningSourceNote,
     ending: endingRec,
     canEditEncodedEnding,
+    canEditDeliveryLedger,
     expectedEndingBy,
     discrepancyBy,
   });
@@ -256,4 +259,97 @@ export async function PUT(req: Request) {
   saveInventoryEnding(ending);
 
   return NextResponse.json({ ok: true, ending: rec });
+}
+
+export async function PATCH(req: Request) {
+  const auth = await requireApiPermission(req, "inventoryDeliveryLedger");
+  if (auth instanceof NextResponse) return auth;
+
+  const body = (await req.json()) as {
+    id?: unknown;
+    productName?: unknown;
+    quantity?: unknown;
+    note?: unknown;
+  };
+  const id = typeof body.id === "string" ? body.id.trim() : "";
+  if (!id) return NextResponse.json({ error: "Missing `id`." }, { status: 400 });
+
+  if (body.productName === undefined && body.quantity === undefined && body.note === undefined) {
+    return NextResponse.json(
+      { error: "Nothing to update (send productName, quantity, and/or note)." },
+      { status: 400 },
+    );
+  }
+
+  const supply = loadInventorySupply();
+  const idx = supply.entries.findIndex((e) => e.id === id);
+  if (idx < 0) return NextResponse.json({ error: "Entry not found." }, { status: 404 });
+
+  const settings = loadAdminSettings();
+  const knownNames = new Set(settings.products.map((p) => p.name));
+
+  const entry = supply.entries[idx]!;
+  const oldDay = entryDayKey(entry.at);
+
+  if (body.productName !== undefined) {
+    const pn = typeof body.productName === "string" ? body.productName.trim() : "";
+    if (!pn || !knownNames.has(pn)) {
+      return NextResponse.json({ error: "Unknown or missing `productName`." }, { status: 400 });
+    }
+    entry.productName = pn;
+  }
+
+  if (body.quantity !== undefined) {
+    const qty =
+      typeof body.quantity === "number"
+        ? body.quantity
+        : typeof body.quantity === "string"
+          ? Number(body.quantity)
+          : NaN;
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return NextResponse.json({ error: "`quantity` must be a positive number." }, { status: 400 });
+    }
+    entry.quantity = qty;
+  }
+
+  if (body.note !== undefined) {
+    if (body.note === null) {
+      delete entry.note;
+    } else if (typeof body.note === "string") {
+      const n = body.note.trim();
+      if (n) entry.note = n;
+      else delete entry.note;
+    }
+  }
+
+  supply.entries[idx] = entry;
+  saveInventorySupply(supply);
+
+  const newDay = entryDayKey(entry.at);
+  if (oldDay) await touchInventoryFlowAround(oldDay);
+  if (newDay && newDay !== oldDay) await touchInventoryFlowAround(newDay);
+
+  return NextResponse.json({ ok: true, entry });
+}
+
+export async function DELETE(req: Request) {
+  const auth = await requireApiPermission(req, "inventoryDeliveryLedger");
+  if (auth instanceof NextResponse) return auth;
+
+  const url = new URL(req.url);
+  const id = (url.searchParams.get("id") ?? "").trim();
+  if (!id) return NextResponse.json({ error: "Missing `id` query parameter." }, { status: 400 });
+
+  const supply = loadInventorySupply();
+  const idx = supply.entries.findIndex((e) => e.id === id);
+  if (idx < 0) return NextResponse.json({ error: "Entry not found." }, { status: 404 });
+
+  const removed = supply.entries[idx]!;
+  const day = entryDayKey(removed.at);
+  supply.entries.splice(idx, 1);
+  saveInventorySupply(supply);
+
+  if (day) await touchInventoryFlowAround(day);
+
+  return NextResponse.json({ ok: true });
 }
