@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { mergeOrderRowWithAdjustment } from "@/data/admin/orderAdjustmentMerge";
+import { applyClaimRulesOnStatusChange } from "@/data/admin/autoPickupClaim";
+import { lookupInvoiceParsedRow } from "@/data/admin/orderInvoiceLookup";
 import { loadOrderAdjustments, saveOrderAdjustments, type OrderStatusAdjustmentValue } from "@/data/admin/storage";
 import { requireApiPermission } from "@/lib/adminApiAuth";
 
@@ -65,5 +68,14 @@ export async function POST(req: Request) {
   };
 
   saveOrderAdjustments(map);
+
+  const found = await lookupInvoiceParsedRow(invoiceNumber);
+  if (found) {
+    const merged = mergeOrderRowWithAdjustment(found.rec, map[invoiceNumber]);
+    const deliveryMethod =
+      typeof merged["deliveryMethod"] === "string" ? (merged["deliveryMethod"] as string).trim() : "";
+    await applyClaimRulesOnStatusChange(invoiceNumber, status, deliveryMethod);
+  }
+
   return NextResponse.json({ ok: true, adjustment: map[invoiceNumber] });
 }

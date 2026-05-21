@@ -44,3 +44,30 @@ export async function POST(req: Request) {
     claimDate: map[invoiceNumber].claimDate,
   });
 }
+
+export async function DELETE(req: Request) {
+  const auth = await requireApiAnyPermission(req, ["orders", "ordersFullEdit"]);
+  if (auth instanceof NextResponse) return auth;
+
+  const url = new URL(req.url);
+  const invoiceNumber = (url.searchParams.get("invoiceNumber") ?? "").trim();
+  if (!invoiceNumber) {
+    return NextResponse.json({ error: "Missing `invoiceNumber`." }, { status: 400 });
+  }
+
+  const map = loadOrderClaims();
+  const prev = map[invoiceNumber];
+  if (!prev) {
+    return NextResponse.json({ error: "This order is not claimed." }, { status: 404 });
+  }
+
+  const claimDay = prev.claimDate?.trim();
+  delete map[invoiceNumber];
+  saveOrderClaims(map);
+
+  if (claimDay && /^\d{4}-\d{2}-\d{2}$/.test(claimDay)) {
+    await touchInventoryFlowAround(claimDay);
+  }
+
+  return NextResponse.json({ ok: true, invoiceNumber });
+}

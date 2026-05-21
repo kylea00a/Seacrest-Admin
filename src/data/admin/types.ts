@@ -239,7 +239,7 @@ export interface OrdersImportSummary {
   productCounts?: Record<string, { package: number; subscription: number; repurchase: number }>;
 }
 
-/** Pick-up: manual claim; delivery: auto-claimed when paid (synced on compile). */
+/** Pick-up: manual claim only; delivery: auto-claimed when status set to Paid/Complete (claim day = that date, Manila). */
 export interface OrderClaimRecord {
   claimedAt: string; // ISO
   /** Calendar claim day (Asia/Manila), YYYY-MM-DD — shown as Claim Date; editable via New Edit. */

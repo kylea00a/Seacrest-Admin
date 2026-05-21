@@ -177,6 +177,9 @@ function OrderLineEditForm({
   onClaimDateChange,
   effectiveDateValue,
   onEffectiveDateChange,
+  isClaimed,
+  onUnclaim,
+  unclaiming,
 }: {
   productKeys: string[];
   draft: LineEditDraft;
@@ -192,6 +195,9 @@ function OrderLineEditForm({
   /** YYYY-MM-DD for order effective date override (New Edit only). */
   effectiveDateValue: string;
   onEffectiveDateChange: (v: string) => void;
+  isClaimed?: boolean;
+  onUnclaim?: () => void;
+  unclaiming?: boolean;
 }) {
   const inp =
     "mt-0.5 w-full rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500/50";
@@ -232,17 +238,19 @@ function OrderLineEditForm({
           full order edit access).
         </p>
       ) : null}
-      {newEditMode ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block text-xs text-zinc-400">
-            Order date (effective)
-            <input
-              type="date"
-              value={effectiveDateValue}
-              onChange={(e) => onEffectiveDateChange(e.target.value)}
-              className={inp}
-            />
-          </label>
+      {newEditMode || isClaimed ? (
+        <div className="flex flex-wrap items-end gap-3">
+          {newEditMode ? (
+            <label className="block text-xs text-zinc-400">
+              Order date (effective)
+              <input
+                type="date"
+                value={effectiveDateValue}
+                onChange={(e) => onEffectiveDateChange(e.target.value)}
+                className={inp}
+              />
+            </label>
+          ) : null}
           <label className="block text-xs text-zinc-400">
             Claim date (Asia/Manila)
             <input
@@ -250,8 +258,20 @@ function OrderLineEditForm({
               value={claimDateValue}
               onChange={(e) => onClaimDateChange(e.target.value)}
               className={inp}
+              readOnly={!newEditMode}
+              disabled={!newEditMode}
             />
           </label>
+          {isClaimed && onUnclaim ? (
+            <button
+              type="button"
+              onClick={onUnclaim}
+              disabled={unclaiming || saving}
+              className="admin-btn-secondary mb-0.5 text-xs text-amber-200 hover:bg-amber-500/15"
+            >
+              {unclaiming ? "…" : "Unclaimed"}
+            </button>
+          ) : null}
         </div>
       ) : null}
       <div className="grid gap-4 lg:grid-cols-3">
@@ -760,6 +780,33 @@ export default function OrdersPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setAdding(false);
+    }
+  };
+
+  const unclaimOrder = async (invoiceNumber: string) => {
+    if (!window.confirm("Mark this order as unclaimed? Pick-up can be claimed again; delivery will not count as claimed until paid again.")) {
+      return;
+    }
+    setSavingClaim(invoiceNumber);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/orders/claim?invoiceNumber=${encodeURIComponent(invoiceNumber)}`,
+        { method: "DELETE" },
+      );
+      const json = await safeReadJson<{ ok?: boolean; error?: string }>(res);
+      if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
+      setClaims((prev) => {
+        const n = { ...prev };
+        delete n[invoiceNumber];
+        return n;
+      });
+      if (search.trim().length >= SEARCH_MIN_LEN) await runServerSearch();
+      else await refetchCompiledRows();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingClaim("");
     }
   };
 
@@ -1893,7 +1940,7 @@ export default function OrdersPage() {
                         return <span className="text-zinc-500">—</span>;
                       })()}
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-zinc-300" title="Calendar day the order was claimed (Asia/Manila). Delivery auto-claim uses the day rows were synced.">
+                    <td className="px-3 py-2 whitespace-nowrap text-zinc-300" title="Claim calendar day (Asia/Manila). Delivery is auto-claimed when you set status to Paid/Complete; pick-up uses the Claim button.">
                       {claimMode === "unpaid" || claimMode === "na"
                         ? "—"
                         : (getClaimCalendarYmd(inv, claims) ?? "—")}
@@ -1934,11 +1981,10 @@ export default function OrdersPage() {
                               setLineEditOpen((prev) => ({ ...prev, [inv]: on }));
                               if (on) {
                                 setLineEditNewOpen((prev) => ({ ...prev, [inv]: false }));
-                                setClaimDateDrafts((prev) => {
-                                  const n = { ...prev };
-                                  delete n[inv];
-                                  return n;
-                                });
+                                setClaimDateDrafts((prev) => ({
+                                  ...prev,
+                                  [inv]: getClaimCalendarYmd(inv, claims) ?? "",
+                                }));
                                 setLineEditDrafts((prev) => ({
                                   ...prev,
                                   [inv]: rowToLineEditDraft(r, productKeys),
@@ -2019,6 +2065,9 @@ export default function OrdersPage() {
                           onChange={(next) =>
                             setLineEditDrafts((prev) => ({ ...prev, [inv]: next }))
                           }
+                          isClaimed={claimMode === "claimed"}
+                          onUnclaim={() => void unclaimOrder(inv)}
+                          unclaiming={savingClaim === inv}
                           onSave={() => void saveLineEdit(inv)}
                           onCancel={() => {
                             setLineEditOpen((prev) => ({ ...prev, [inv]: false }));

@@ -1,100 +1,71 @@
-import {
-  calendarYmdInTimeZone,
-  isNonPickupDelivery,
-  isPickupDelivery,
-  paidFromStatusText,
-} from "@/data/admin/orderClaim";
+import { calendarYmdInTimeZone, isNonPickupDelivery } from "@/data/admin/orderClaim";
 import { loadOrderClaims, saveOrderClaims } from "@/data/admin/storage";
+import type { OrderStatusAdjustmentValue } from "@/data/admin/storage";
+import { touchInventoryFlowAround } from "@/lib/inventoryFlow";
+
+function isPaidStatus(status: OrderStatusAdjustmentValue): boolean {
+  return status === "Paid" || status === "Complete";
+}
 
 /**
- * Auto-claim pick-up orders that are paid and have a non-empty shipping address
- * (no manual Claim click required).
+ * When status changes: delivery + paid → auto-claim on claim calendar day = today (Manila);
+ * pick-up + paid → stays unclaimed (any prior auto-claim is removed).
  */
-export function syncAutoPickupClaimsFromCompiledRows(
-  rows: Array<{
-    invoiceNumber?: unknown;
-    deliveryMethod?: unknown;
-    status?: unknown;
-    shippingFullAddress?: unknown;
-    /** Effective / import date (YYYY-MM-DD) — must not use “today” or orders look claimed today on page load. */
-    date?: unknown;
-  }>,
-): void {
+export async function applyClaimRulesOnStatusChange(
+  invoiceNumber: string,
+  status: OrderStatusAdjustmentValue,
+  deliveryMethod: string,
+): Promise<void> {
   const claims = loadOrderClaims();
-  let changed = false;
-  const now = new Date();
+  const prev = claims[invoiceNumber];
+  const prevClaimDay = prev?.claimDate?.trim();
 
-  for (const row of rows) {
-    const inv =
-      typeof row.invoiceNumber === "string" ? row.invoiceNumber.trim() : "";
-    if (!inv || claims[inv]) continue;
-
-    const dm =
-      typeof row.deliveryMethod === "string"
-        ? row.deliveryMethod.trim()
-        : "";
-    if (!isPickupDelivery(dm)) continue;
-
-    const status = typeof row.status === "string" ? row.status : "";
-    if (!paidFromStatusText(status)) continue;
-
-    const addr =
-      typeof row.shippingFullAddress === "string"
-        ? row.shippingFullAddress.trim()
-        : "";
-    if (!addr) continue;
-
-    const d = typeof row.date === "string" ? row.date.trim().slice(0, 10) : "";
-    const claimDate = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : calendarYmdInTimeZone(now, "Asia/Manila");
-    claims[inv] = {
+  if (isPaidStatus(status) && isNonPickupDelivery(deliveryMethod)) {
+    const now = new Date();
+    const claimDate = calendarYmdInTimeZone(now, "Asia/Manila");
+    claims[invoiceNumber] = {
       claimedAt: now.toISOString(),
       claimDate,
       claimDateExplicit: true,
     };
-    changed = true;
+    saveOrderClaims(claims);
+    await touchInventoryFlowAround(claimDate);
+    if (prevClaimDay && prevClaimDay !== claimDate) await touchInventoryFlowAround(prevClaimDay);
+    return;
   }
 
-  if (changed) saveOrderClaims(claims);
+  if (isPaidStatus(status)) {
+    return;
+  }
+
+  if (prev) {
+    delete claims[invoiceNumber];
+    saveOrderClaims(claims);
+    if (prevClaimDay) await touchInventoryFlowAround(prevClaimDay);
+  }
 }
 
-/**
- * Paid delivery orders: persist a claim record the first time compiled rows are loaded
- * so Claim Date reflects the day of sync (auto-claim).
- */
+/** Pick-up is never auto-claimed on page load. */
+export function syncAutoPickupClaimsFromCompiledRows(
+  _rows: Array<{
+    invoiceNumber?: unknown;
+    deliveryMethod?: unknown;
+    status?: unknown;
+    shippingFullAddress?: unknown;
+    date?: unknown;
+  }>,
+): void {
+  void _rows;
+}
+
+/** Delivery auto-claim on compile disabled — claim is set when status becomes Paid/Complete. */
 export function syncAutoDeliveryClaimsFromCompiledRows(
-  rows: Array<{
+  _rows: Array<{
     invoiceNumber?: unknown;
     deliveryMethod?: unknown;
     status?: unknown;
     date?: unknown;
   }>,
 ): void {
-  const claims = loadOrderClaims();
-  let changed = false;
-  const now = new Date();
-  const claimedAt = now.toISOString();
-
-  for (const row of rows) {
-    const inv =
-      typeof row.invoiceNumber === "string" ? row.invoiceNumber.trim() : "";
-    if (!inv || claims[inv]) continue;
-
-    const dm =
-      typeof row.deliveryMethod === "string"
-        ? row.deliveryMethod.trim()
-        : "";
-    if (!isNonPickupDelivery(dm)) continue;
-
-    const status = typeof row.status === "string" ? row.status : "";
-    if (!paidFromStatusText(status)) continue;
-
-    // For delivery orders, keep the claim calendar day stable (the order's effective date),
-    // otherwise old orders would appear as "claimed today" and inflate today's delivery list.
-    const d = typeof row.date === "string" ? row.date.trim().slice(0, 10) : "";
-    const claimDate = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : calendarYmdInTimeZone(now, "Asia/Manila");
-    claims[inv] = { claimedAt, claimDate, claimDateExplicit: true };
-    changed = true;
-  }
-
-  if (changed) saveOrderClaims(claims);
+  void _rows;
 }
