@@ -20,6 +20,7 @@ type Row = {
   productName: string;
   deliveryIn: number;
   rtsIn: number;
+  adjustment: number;
   out: number;
   netPeriod: number;
 };
@@ -93,7 +94,17 @@ export default function InventoryPage() {
   const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null);
   const [outDetails, setOutDetails] = useState<OutOrderDetail[]>([]);
   const [outByOrderDeliveryFilter, setOutByOrderDeliveryFilter] = useState<"All" | "Pickup" | "Delivery">("All");
-  const [dayTotals, setDayTotals] = useState<{ deliveryIn: number; rtsIn: number; out: number } | null>(null);
+  const [adjustmentEntries, setAdjustmentEntries] = useState<Entry[]>([]);
+  const [adjProduct, setAdjProduct] = useState("");
+  const [adjQuantity, setAdjQuantity] = useState("");
+  const [adjNote, setAdjNote] = useState("");
+  const [savingAdjustment, setSavingAdjustment] = useState(false);
+  const [dayTotals, setDayTotals] = useState<{
+    deliveryIn: number;
+    rtsIn: number;
+    adjustment: number;
+    out: number;
+  } | null>(null);
 
   const loadOutDetails = useCallback(async (start: string, end: string) => {
     setLoadingOutDetails(true);
@@ -128,7 +139,8 @@ export default function InventoryPage() {
       const json = await safeReadJson<{
         rows?: Row[];
         entries?: Entry[];
-        totals?: { deliveryIn: number; rtsIn: number; out: number };
+        totals?: { deliveryIn: number; rtsIn: number; adjustment: number; out: number };
+        adjustmentEntries?: Entry[];
         productNames?: string[];
         beginningBy?: Record<string, number>;
         beginningSourceNote?: string;
@@ -142,8 +154,9 @@ export default function InventoryPage() {
       }>(res);
       if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
       setRows(json.rows ?? []);
-      setEntries(json.entries ?? []);
-      setDayTotals(json.totals ?? null);
+        setEntries(json.entries ?? []);
+        setAdjustmentEntries(json.adjustmentEntries ?? []);
+        setDayTotals(json.totals ?? null);
       setProductNames(json.productNames ?? []);
       setEnding((json.ending ?? null) as EndingSnapshot | null);
       setCanEditEncodedEnding(Boolean(json.canEditEncodedEnding));
@@ -185,6 +198,8 @@ export default function InventoryPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          action: "addDeliveryIn",
+          date: startDate,
           productName: productName.trim(),
           quantity: q,
           ...(note.trim() ? { note: note.trim() } : {}),
@@ -267,6 +282,37 @@ export default function InventoryPage() {
     }
   };
 
+  const submitAdjustment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!startDate) return;
+    const q = Number(adjQuantity);
+    if (!adjProduct.trim() || !Number.isFinite(q) || q === 0) return;
+    setSavingAdjustment(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/inventory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "addAdjustment",
+          date: startDate,
+          productName: adjProduct.trim(),
+          quantity: q,
+          ...(adjNote.trim() ? { note: adjNote.trim() } : {}),
+        }),
+      });
+      const json = await safeReadJson<{ ok?: boolean; error?: string }>(res);
+      if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
+      setAdjQuantity("");
+      setAdjNote("");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingAdjustment(false);
+    }
+  };
+
   const dayDescription = rangeLabel.start || (pickDay ? format(pickDay, "yyyy-MM-dd") : "");
   const hasDiscrepancy = Object.keys(discrepancyBy).length > 0;
 
@@ -314,12 +360,14 @@ export default function InventoryPage() {
       <h1 className="admin-title">Inventory</h1>
       <p className="admin-muted mt-1 max-w-3xl">
         Pick <strong>one day</strong> (same calendar design as All Orders, but a single date) to see{" "}
-        <strong>delivery in</strong>, <strong>RTS in</strong>, and <strong>out</strong> for that day (from{" "}
+        <strong>delivery in</strong>, <strong>adjustments</strong>, <strong>RTS in</strong>, and <strong>out</strong> for
+        that day (from{" "}
         <a href="/admin/inventory-flow" className="text-sky-400 hover:underline">
           Inventory Flow
         </a>
         ). Use the arrows to move the calendar by{" "}
-        <strong>two months</strong>. <strong>Out</strong> uses orders claimed on that effective date.
+        <strong>two months</strong>. <strong>Beginning</strong> uses yesterday&apos;s <strong>encoded</strong> ending when
+        you have locked it. <strong>Out</strong> uses orders claimed on that effective date.
       </p>
 
       <div className="admin-card-inset mt-6 flex flex-wrap items-end gap-4">
@@ -392,6 +440,70 @@ export default function InventoryPage() {
         </div>
       </form>
 
+      <form onSubmit={submitAdjustment} className="admin-card-inset mt-6">
+        <div className="text-sm font-semibold text-zinc-200">Record adjustment</div>
+        <p className="mt-1 text-xs text-zinc-500">
+          Physical count correction for <strong>{dayDescription || "selected day"}</strong>. Use a{" "}
+          <strong>negative</strong> quantity for shortage (e.g. −5 if 5 pieces short).
+        </p>
+        <div className="mt-3 flex flex-wrap items-end gap-3">
+          <div>
+            <div className="text-xs font-semibold text-zinc-400">Product</div>
+            <select
+              value={adjProduct}
+              onChange={(e) => setAdjProduct(e.target.value)}
+              className="admin-select mt-1 min-w-[12rem]"
+              required
+            >
+              <option value="">Select…</option>
+              {productNames.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-zinc-400">Quantity</div>
+            <input
+              type="number"
+              step="any"
+              value={adjQuantity}
+              onChange={(e) => setAdjQuantity(e.target.value)}
+              className="admin-input mt-1 w-28"
+              placeholder="e.g. -3"
+              required
+            />
+          </div>
+          <div className="min-w-[12rem] flex-1">
+            <div className="text-xs font-semibold text-zinc-400">Note (optional)</div>
+            <input
+              value={adjNote}
+              onChange={(e) => setAdjNote(e.target.value)}
+              className="admin-input mt-1 w-full max-w-md"
+              placeholder="Count variance, damage…"
+            />
+          </div>
+          <button type="submit" disabled={savingAdjustment || !startDate} className="admin-btn-primary">
+            {savingAdjustment ? "Saving…" : "Add adjustment"}
+          </button>
+        </div>
+        {adjustmentEntries.length > 0 ? (
+          <ul className="mt-3 space-y-1 text-xs text-zinc-400">
+            {adjustmentEntries.map((e) => (
+              <li key={e.id}>
+                {e.productName}:{" "}
+                <span className={e.quantity < 0 ? "text-amber-400" : "text-emerald-300/90"}>
+                  {e.quantity > 0 ? "+" : ""}
+                  {e.quantity}
+                </span>
+                {e.note ? ` — ${e.note}` : ""}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </form>
+
       {dayTotals && dayDescription ? (
         <div className="admin-card-inset mt-6">
           <div className="text-sm font-semibold text-zinc-200">Day totals ({dayDescription})</div>
@@ -409,6 +521,16 @@ export default function InventoryPage() {
               <span className="font-semibold tabular-nums text-violet-300/90">{dayTotals.rtsIn ?? 0}</span>
             </div>
             <div>
+              <span className="text-zinc-500">Adjustment</span>{" "}
+              <span
+                className={`font-semibold tabular-nums ${
+                  (dayTotals.adjustment ?? 0) < 0 ? "text-amber-400" : (dayTotals.adjustment ?? 0) > 0 ? "text-emerald-300/90" : "text-zinc-300"
+                }`}
+              >
+                {dayTotals.adjustment ?? 0}
+              </span>
+            </div>
+            <div>
               <span className="text-zinc-500">Out (claimed)</span>{" "}
               <span className="font-semibold tabular-nums text-rose-300/90">{dayTotals.out}</span>
             </div>
@@ -416,14 +538,14 @@ export default function InventoryPage() {
               <span className="text-zinc-500">Net</span>{" "}
               <span
                 className={`font-semibold tabular-nums ${
-                  dayTotals.deliveryIn + (dayTotals.rtsIn ?? 0) - dayTotals.out < 0
+                  dayTotals.deliveryIn + (dayTotals.rtsIn ?? 0) + (dayTotals.adjustment ?? 0) - dayTotals.out < 0
                     ? "text-amber-400"
-                    : dayTotals.deliveryIn + (dayTotals.rtsIn ?? 0) - dayTotals.out > 0
+                    : dayTotals.deliveryIn + (dayTotals.rtsIn ?? 0) + (dayTotals.adjustment ?? 0) - dayTotals.out > 0
                       ? "text-emerald-400/90"
                       : "text-zinc-300"
                 }`}
               >
-                {dayTotals.deliveryIn + (dayTotals.rtsIn ?? 0) - dayTotals.out}
+                {dayTotals.deliveryIn + (dayTotals.rtsIn ?? 0) + (dayTotals.adjustment ?? 0) - dayTotals.out}
               </span>
             </div>
           </div>
@@ -443,6 +565,7 @@ export default function InventoryPage() {
                 <th className="px-3 py-2 text-right whitespace-nowrap">Beginning</th>
                 <th className="px-3 py-2 text-right">Delivery in</th>
                 <th className="px-3 py-2 text-right">RTS in</th>
+                <th className="px-3 py-2 text-right">Adjustment</th>
                 <th className="px-3 py-2 text-right">Out (claimed)</th>
                 <th className="px-3 py-2 text-right">Net</th>
                 <th className="px-3 py-2 text-right whitespace-nowrap">Ending (encode)</th>
@@ -453,7 +576,7 @@ export default function InventoryPage() {
             <tbody className="divide-y divide-white/10">
               {rows.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-4 text-zinc-500" colSpan={9}>
+                  <td className="px-3 py-4 text-zinc-500" colSpan={10}>
                     No products in settings yet, or no movement on this day.
                   </td>
                 </tr>
@@ -466,6 +589,13 @@ export default function InventoryPage() {
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-emerald-300/90">{r.deliveryIn}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-violet-300/90">{r.rtsIn ?? 0}</td>
+                    <td
+                      className={`px-3 py-2 text-right tabular-nums ${
+                        r.adjustment < 0 ? "text-amber-400" : r.adjustment > 0 ? "text-emerald-300/90" : "text-zinc-500"
+                      }`}
+                    >
+                      {r.adjustment !== 0 ? r.adjustment : "—"}
+                    </td>
                     <td className="px-3 py-2 text-right tabular-nums text-rose-300/90">{r.out}</td>
                     <td
                       className={`px-3 py-2 text-right font-medium tabular-nums ${

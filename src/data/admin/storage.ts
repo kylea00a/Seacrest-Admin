@@ -10,6 +10,7 @@ import type {
   Department,
   Expense,
   InventoryRtsInEntry,
+  InventoryAdjustmentEntry,
   InventorySupplyEntry,
   OrderClaimRecord,
   OrdersImportSummary,
@@ -42,6 +43,7 @@ const ORDER_ADJUSTMENTS_FILE = path.join(ADMIN_DATA_DIR, "orderAdjustments.json"
 const ORDER_CLAIMS_FILE = path.join(ADMIN_DATA_DIR, "orderClaims.json");
 const INVENTORY_SUPPLY_FILE = path.join(ADMIN_DATA_DIR, "inventorySupply.json");
 const INVENTORY_RTS_IN_FILE = path.join(ADMIN_DATA_DIR, "inventoryRtsIn.json");
+const INVENTORY_ADJUSTMENTS_FILE = path.join(ADMIN_DATA_DIR, "inventoryAdjustments.json");
 const INVENTORY_FLOW_FILE = path.join(ADMIN_DATA_DIR, "inventoryFlow.json");
 const INVENTORY_ENDING_FILE = path.join(ADMIN_DATA_DIR, "inventoryEnding.json");
 const CASH_LEDGER_FILE = path.join(ADMIN_DATA_DIR, "cashLedger.json");
@@ -483,6 +485,22 @@ export function loadInventoryRtsIn(): InventoryRtsInFile {
 
 export function saveInventoryRtsIn(data: InventoryRtsInFile) {
   writeJsonFile(INVENTORY_RTS_IN_FILE, data);
+}
+
+export type InventoryAdjustmentsFile = {
+  entries: InventoryAdjustmentEntry[];
+};
+
+export function loadInventoryAdjustments(): InventoryAdjustmentsFile {
+  const raw = readJsonFile<unknown>(INVENTORY_ADJUSTMENTS_FILE, { entries: [] });
+  if (raw && typeof raw === "object" && Array.isArray((raw as InventoryAdjustmentsFile).entries)) {
+    return raw as InventoryAdjustmentsFile;
+  }
+  return { entries: [] };
+}
+
+export function saveInventoryAdjustments(data: InventoryAdjustmentsFile) {
+  writeJsonFile(INVENTORY_ADJUSTMENTS_FILE, data);
 }
 
 export type InventoryFlowFile = {

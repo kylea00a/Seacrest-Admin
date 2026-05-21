@@ -269,14 +269,24 @@ export interface InventoryRtsInEntry {
   at: string; // ISO
 }
 
+/** Physical count correction (negative = shortage) for a calendar day. */
+export interface InventoryAdjustmentEntry {
+  id: string;
+  productName: string;
+  quantity: number;
+  note?: string;
+  at: string; // ISO
+}
+
 /** One day in the inventory flow ledger (source of truth for beginning/ending chain). */
 export interface InventoryFlowDayRow {
   date: string; // YYYY-MM-DD
   beginning: Record<string, number>;
   delivery: Record<string, number>;
   rtsIn: Record<string, number>;
+  adjustment: Record<string, number>;
   out: Record<string, number>;
-  /** Calculated: beginning + delivery + rtsIn − out */
+  /** Calculated: beginning + delivery + rtsIn + adjustment − out */
   ending: Record<string, number>;
   updatedAt: string; // ISO
 }

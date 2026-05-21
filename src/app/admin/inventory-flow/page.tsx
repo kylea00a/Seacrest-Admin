@@ -24,6 +24,7 @@ type FlowRow = {
   beginning?: Record<string, number>;
   delivery?: Record<string, number>;
   rtsIn?: Record<string, number>;
+  adjustment?: Record<string, number>;
   out?: Record<string, number>;
   ending?: Record<string, number>;
   missing?: boolean;
@@ -33,6 +34,7 @@ const SECTIONS = [
   { key: "beginning", label: "BEGINNING INVENTORY", bg: "bg-sky-950/50" },
   { key: "delivery", label: "DELIVERY", bg: "bg-emerald-950/40" },
   { key: "rtsIn", label: "RTS IN", bg: "bg-violet-950/40" },
+  { key: "adjustment", label: "ADJUSTMENT", bg: "bg-amber-950/40" },
   { key: "out", label: "OUT", bg: "bg-rose-950/40" },
 ] as const;
 
@@ -93,7 +95,9 @@ export default function InventoryFlowPage() {
           ? row.delivery
           : section === "rtsIn"
             ? row.rtsIn
-            : row.out;
+            : section === "adjustment"
+              ? row.adjustment
+              : row.out;
     const v = map?.[product];
     if (v == null || v === 0) return "";
     return v;
@@ -104,7 +108,8 @@ export default function InventoryFlowPage() {
       <h1 className="admin-title">Inventory Flow</h1>
       <p className="admin-muted mt-1 max-w-3xl">
         Daily product flow: <strong>Beginning</strong> = yesterday&apos;s <strong>Ending</strong>;{" "}
-        <strong>Ending</strong> = Beginning + Delivery + RTS IN − OUT. Inventory reads this table for instant loads.
+        <strong>Ending</strong> = Beginning + Delivery + RTS IN + Adjustment − OUT. Beginning uses yesterday&apos;s{" "}
+        <strong>encoded</strong> ending when available. Inventory reads this table for instant loads.
         Use <strong>Refresh month</strong> after bulk order/claim changes to recompute OUT from orders.
       </p>
 

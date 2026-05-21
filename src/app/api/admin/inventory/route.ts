@@ -3,13 +3,15 @@ import { randomUUID } from "crypto";
 import { computeClaimedOutDetailsForRange } from "@/data/admin/inventoryCompute";
 import {
   loadAdminSettings,
+  loadInventoryAdjustments,
   loadInventoryEnding,
   loadInventorySupply,
+  saveInventoryAdjustments,
   saveInventoryEnding,
   saveInventorySupply,
 } from "@/data/admin/storage";
 import type { InventoryEndingSnapshot } from "@/data/admin/types";
-import type { InventorySupplyEntry } from "@/data/admin/types";
+import type { InventoryAdjustmentEntry, InventorySupplyEntry } from "@/data/admin/types";
 import { accountHasPermission } from "@/data/admin/accountsStore";
 import { requireApiPermission } from "@/lib/adminApiAuth";
 import {
@@ -81,33 +83,46 @@ export async function GET(req: Request) {
     flowRow = getInventoryFlowRow(dayKey) ?? (await syncInventoryFlowDay(dayKey));
   }
 
+  const yesterday = addDaysYmd(dayKey, -1);
+  const yesterdayEncoded = ending.byDate?.[yesterday];
   const beginningBy = flowRow.beginning;
-  const beginningSourceNote = `From inventory flow (ending on ${addDaysYmd(dayKey, -1)})`;
+  const beginningSourceNote = yesterdayEncoded?.counts
+    ? `Encoded ending inventory from ${yesterday} (actual count)`
+    : `Calculated flow ending on ${yesterday} (encode yesterday for actual beginning)`;
 
   const deliveryInPeriod = flowRow.delivery;
   const rtsInPeriod = flowRow.rtsIn;
+  const adjustmentPeriod = flowRow.adjustment ?? {};
   const outPeriod = flowRow.out;
 
   const allKeys = new Set<string>([
     ...productNames,
     ...Object.keys(deliveryInPeriod),
     ...Object.keys(rtsInPeriod),
+    ...Object.keys(adjustmentPeriod),
     ...Object.keys(outPeriod),
   ]);
   const rows = [...allKeys].sort((a, b) => a.localeCompare(b)).map((name) => {
     const din = deliveryInPeriod[name] ?? 0;
     const rts = rtsInPeriod[name] ?? 0;
+    const adj = adjustmentPeriod[name] ?? 0;
     const out = outPeriod[name] ?? 0;
     return {
       productName: name,
       deliveryIn: din,
       rtsIn: rts,
+      adjustment: adj,
       out,
-      netPeriod: din + rts - out,
+      netPeriod: din + rts + adj - out,
     };
   });
 
   const entriesInPeriod = supply.entries
+    .filter((e) => entryDayKey(e.at) === dayKey)
+    .sort((a, b) => b.at.localeCompare(a.at));
+
+  const adjustments = loadInventoryAdjustments();
+  const adjustmentEntriesInPeriod = adjustments.entries
     .filter((e) => entryDayKey(e.at) === dayKey)
     .sort((a, b) => b.at.localeCompare(a.at));
 
@@ -127,10 +142,12 @@ export async function GET(req: Request) {
 
   let totalDeliveryIn = 0;
   let totalRtsIn = 0;
+  let totalAdjustment = 0;
   let totalOut = 0;
   for (const r of rows) {
     totalDeliveryIn += r.deliveryIn;
     totalRtsIn += r.rtsIn;
+    totalAdjustment += r.adjustment;
     totalOut += r.out;
   }
 
@@ -140,8 +157,14 @@ export async function GET(req: Request) {
     productNames,
     rows,
     entries: entriesInPeriod,
+    adjustmentEntries: adjustmentEntriesInPeriod,
     outDetails: [],
-    totals: { deliveryIn: totalDeliveryIn, rtsIn: totalRtsIn, out: totalOut },
+    totals: {
+      deliveryIn: totalDeliveryIn,
+      rtsIn: totalRtsIn,
+      adjustment: totalAdjustment,
+      out: totalOut,
+    },
     beginningBy,
     beginningSourceNote,
     ending: endingRec,
@@ -156,10 +179,13 @@ export async function POST(req: Request) {
   const auth = await requireApiPermission(req, "inventory");
   if (auth instanceof NextResponse) return auth;
   const body = (await req.json()) as {
+    action?: unknown;
     productName?: unknown;
     quantity?: unknown;
     note?: unknown;
+    date?: unknown;
   };
+  const action = typeof body.action === "string" ? body.action : "addDeliveryIn";
   const productName = typeof body.productName === "string" ? body.productName.trim() : "";
   const qty =
     typeof body.quantity === "number"
@@ -168,12 +194,11 @@ export async function POST(req: Request) {
         ? Number(body.quantity)
         : NaN;
   const note = typeof body.note === "string" ? body.note.trim() : undefined;
+  const date =
+    typeof body.date === "string" && isDateOnly(body.date.trim()) ? body.date.trim() : todayISO();
 
   if (!productName) {
     return NextResponse.json({ error: "Missing `productName`." }, { status: 400 });
-  }
-  if (!Number.isFinite(qty) || qty <= 0) {
-    return NextResponse.json({ error: "`quantity` must be a positive number." }, { status: 400 });
   }
 
   const settings = loadAdminSettings();
@@ -182,19 +207,40 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unknown product. Add it under Packages & Products first." }, { status: 400 });
   }
 
+  if (action === "addAdjustment") {
+    if (!Number.isFinite(qty) || qty === 0) {
+      return NextResponse.json({ error: "`quantity` must be non-zero (use negative for shortage)." }, { status: 400 });
+    }
+    const adjustments = loadInventoryAdjustments();
+    const entry: InventoryAdjustmentEntry = {
+      id: randomUUID(),
+      productName,
+      quantity: qty,
+      at: `${date}T12:00:00.000Z`,
+      ...(note ? { note } : {}),
+    };
+    adjustments.entries.push(entry);
+    saveInventoryAdjustments(adjustments);
+    await touchInventoryFlowAround(date);
+    return NextResponse.json({ ok: true, entry });
+  }
+
+  if (!Number.isFinite(qty) || qty <= 0) {
+    return NextResponse.json({ error: "`quantity` must be a positive number." }, { status: 400 });
+  }
+
   const supply = loadInventorySupply();
   const entry: InventorySupplyEntry = {
     id: randomUUID(),
     productName,
     quantity: qty,
-    at: new Date().toISOString(),
+    at: `${date}T12:00:00.000Z`,
     ...(note ? { note } : {}),
   };
   supply.entries.push(entry);
   saveInventorySupply(supply);
 
-  const day = entryDayKey(entry.at);
-  if (day) await touchInventoryFlowAround(day);
+  await touchInventoryFlowAround(date);
 
   return NextResponse.json({ ok: true, entry });
 }
@@ -257,6 +303,8 @@ export async function PUT(req: Request) {
   ending.byDate = ending.byDate ?? {};
   ending.byDate[date] = rec;
   saveInventoryEnding(ending);
+
+  await touchInventoryFlowAround(date);
 
   return NextResponse.json({ ok: true, ending: rec });
 }
