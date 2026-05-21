@@ -41,6 +41,13 @@ export default function CashBalancesPage() {
   const [customDesc, setCustomDesc] = useState("");
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string>("");
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferFromId, setTransferFromId] = useState("");
+  const [transferToId, setTransferToId] = useState("");
+  const [transferDate, setTransferDate] = useState(todayYmd);
+  const [transferAmount, setTransferAmount] = useState("");
+  const [transferNote, setTransferNote] = useState("");
+  const [transferring, setTransferring] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -131,7 +138,13 @@ export default function CashBalancesPage() {
 
   const deleteTxn = async (id: string) => {
     if (!canDelete) return;
-    const ok = window.confirm("Delete this transaction? This cannot be undone.");
+    const txn = txns.find((t) => t.id === id);
+    const isPair = Boolean(txn?.transferPairId);
+    const ok = window.confirm(
+      isPair
+        ? "Delete this bank transfer? Both the debit and credit legs will be removed."
+        : "Delete this transaction? This cannot be undone.",
+    );
     if (!ok) return;
     setDeletingId(id);
     setError(null);
@@ -159,6 +172,58 @@ export default function CashBalancesPage() {
     return b;
   }, [txns, accountId]);
 
+  const accountLabel = (id: string) => {
+    const a = accounts.find((x) => x.id === id);
+    return a ? `${a.name} (${a.bank})` : id;
+  };
+
+  const openTransfer = () => {
+    const others = accounts.filter((a) => a.id !== accountId);
+    setTransferFromId(accountId);
+    setTransferToId(others[0]?.id ?? "");
+    setTransferDate(todayYmd);
+    setTransferAmount("");
+    setTransferNote("");
+    setTransferOpen(true);
+    setError(null);
+  };
+
+  const submitTransfer = async () => {
+    const amt = Number(transferAmount);
+    if (!transferFromId || !transferToId || transferFromId === transferToId) return;
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setError("Enter a positive transfer amount.");
+      return;
+    }
+    setTransferring(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/cash", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "transferBetweenAccounts",
+          fromAccountId: transferFromId,
+          toAccountId: transferToId,
+          date: transferDate,
+          amount: amt,
+          ...(transferNote.trim() ? { description: transferNote.trim() } : {}),
+        }),
+      });
+      const json = await safeReadJson<{ ok?: boolean; error?: string }>(res);
+      if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
+      setTransferOpen(false);
+      setAccountId(transferToId);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTransferring(false);
+    }
+  };
+
+  const needsTwoBanks = accounts.length < 2;
+
   return (
     <div className="admin-card min-w-0">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -185,8 +250,22 @@ export default function CashBalancesPage() {
           <div className="text-xs text-zinc-400">
             Balance: <span className="font-semibold text-zinc-200">{currency(balance)}</span>
           </div>
+          <button
+            type="button"
+            onClick={openTransfer}
+            disabled={needsTwoBanks || loading}
+            className="admin-btn-primary"
+            title={needsTwoBanks ? "Add at least two bank accounts under Settings" : "Move money between bank accounts"}
+          >
+            Transfer money
+          </button>
         </div>
       </div>
+      {needsTwoBanks && !loading ? (
+        <p className="mt-3 text-xs text-amber-400/90">
+          Add at least two bank accounts in Settings → Categories to use transfers.
+        </p>
+      ) : null}
 
       {loading ? <div className="mt-4 text-sm text-zinc-300">Loading…</div> : null}
       {error ? <div className="admin-alert-error mt-4">{error}</div> : null}
@@ -292,6 +371,128 @@ export default function CashBalancesPage() {
           </table>
         </div>
       </div>
+
+      {transferOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-4 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-white">Transfer money</div>
+                <div className="admin-muted mt-1 text-xs">Debit the from account, credit the to account (same date).</div>
+              </div>
+              <button
+                type="button"
+                className="admin-btn-secondary px-3 py-1.5 text-xs"
+                onClick={() => setTransferOpen(false)}
+                disabled={transferring}
+              >
+                Close
+              </button>
+            </div>
+
+            <label className="mt-4 block text-xs font-semibold text-zinc-400">
+              Date
+              <input
+                type="date"
+                value={transferDate}
+                onChange={(e) => setTransferDate(e.target.value)}
+                className="admin-input mt-1 w-full"
+                disabled={transferring}
+              />
+            </label>
+
+            <label className="mt-3 block text-xs font-semibold text-zinc-400">
+              From account
+              <select
+                value={transferFromId}
+                onChange={(e) => setTransferFromId(e.target.value)}
+                className="admin-select mt-1 w-full"
+                disabled={transferring}
+              >
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.bank})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="mt-3 block text-xs font-semibold text-zinc-400">
+              To account
+              <select
+                value={transferToId}
+                onChange={(e) => setTransferToId(e.target.value)}
+                className="admin-select mt-1 w-full"
+                disabled={transferring}
+              >
+                {accounts.filter((a) => a.id !== transferFromId).map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.bank})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="mt-3 block text-xs font-semibold text-zinc-400">
+              Amount
+              <input
+                value={transferAmount}
+                onChange={(e) => setTransferAmount(e.target.value)}
+                className="admin-input mt-1 w-full"
+                inputMode="decimal"
+                placeholder="0.00"
+                disabled={transferring}
+              />
+            </label>
+
+            <label className="mt-3 block text-xs font-semibold text-zinc-400">
+              Note (optional)
+              <input
+                value={transferNote}
+                onChange={(e) => setTransferNote(e.target.value)}
+                className="admin-input mt-1 w-full"
+                placeholder="e.g. fund BPI from GCash"
+                disabled={transferring}
+              />
+            </label>
+
+            <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-zinc-300">
+              {transferFromId && transferToId ? (
+                <>
+                  <span className="text-rose-300/90">−{currency(Number(transferAmount) || 0)}</span> on{" "}
+                  <span className="font-medium text-zinc-100">{accountLabel(transferFromId)}</span>
+                  <br />
+                  <span className="text-emerald-300/90">+{currency(Number(transferAmount) || 0)}</span> on{" "}
+                  <span className="font-medium text-zinc-100">{accountLabel(transferToId)}</span>
+                </>
+              ) : (
+                "Choose from and to accounts."
+              )}
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="admin-btn-secondary" onClick={() => setTransferOpen(false)} disabled={transferring}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="admin-btn-primary"
+                disabled={
+                  transferring ||
+                  !transferFromId ||
+                  !transferToId ||
+                  transferFromId === transferToId ||
+                  !Number.isFinite(Number(transferAmount)) ||
+                  Number(transferAmount) <= 0
+                }
+                onClick={() => void submitTransfer()}
+              >
+                {transferring ? "Transferring…" : "Confirm transfer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

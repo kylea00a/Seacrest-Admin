@@ -52,7 +52,7 @@ export async function POST(req: Request) {
   ) {
     const auth = await requireApiPermission(req, "salesReport");
     if (auth instanceof NextResponse) return auth;
-  } else if (action === "addTransaction") {
+  } else if (action === "addTransaction" || action === "transferBetweenAccounts") {
     const auth = await requireApiPermission(req, "pettyCash");
     if (auth instanceof NextResponse) return auth;
   } else if (action === "deleteTransaction") {
@@ -131,12 +131,72 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, tx, file });
   }
 
+  if (action === "transferBetweenAccounts") {
+    const fromAccountId = typeof body.fromAccountId === "string" ? body.fromAccountId.trim() : "";
+    const toAccountId = typeof body.toAccountId === "string" ? body.toAccountId.trim() : "";
+    const date = typeof body.date === "string" ? body.date.trim() : "";
+    const amount = num(body.amount);
+    const note = typeof body.description === "string" ? body.description.trim() : "";
+
+    if (!fromAccountId || !toAccountId) {
+      return NextResponse.json({ error: "Missing `fromAccountId` or `toAccountId`." }, { status: 400 });
+    }
+    if (fromAccountId === toAccountId) {
+      return NextResponse.json({ error: "From and to accounts must be different." }, { status: 400 });
+    }
+    if (!isDateOnly(date)) return NextResponse.json({ error: "Missing/invalid `date` (YYYY-MM-DD)." }, { status: 400 });
+    if (!Number.isFinite(amount) || amount <= 0) return NextResponse.json({ error: "Invalid `amount`." }, { status: 400 });
+
+    const fromAcc = file.accounts.find((a) => a.id === fromAccountId);
+    const toAcc = file.accounts.find((a) => a.id === toAccountId);
+    if (!fromAcc) return NextResponse.json({ error: "From account not found." }, { status: 404 });
+    if (!toAcc) return NextResponse.json({ error: "To account not found." }, { status: 404 });
+
+    const pairId = randomUUID();
+    const baseDesc = note || `Transfer to ${toAcc.name}`;
+    const debitTx: CashTransaction = {
+      id: randomUUID(),
+      accountId: fromAccountId,
+      date,
+      description: `${baseDesc} (transfer out)`,
+      debit: amount,
+      credit: 0,
+      kind: "bank_transfer",
+      transferPairId: pairId,
+      counterpartyAccountId: toAccountId,
+      createdAt: new Date().toISOString(),
+    };
+    const creditTx: CashTransaction = {
+      id: randomUUID(),
+      accountId: toAccountId,
+      date,
+      description: `${note || `Transfer from ${fromAcc.name}`} (transfer in)`,
+      debit: 0,
+      credit: amount,
+      kind: "bank_transfer",
+      transferPairId: pairId,
+      counterpartyAccountId: fromAccountId,
+      createdAt: new Date().toISOString(),
+    };
+    file.transactions.unshift(creditTx, debitTx);
+    saveCashLedger(file);
+    return NextResponse.json({ ok: true, debit: debitTx, credit: creditTx, file });
+  }
+
   if (action === "deleteTransaction") {
     const id = typeof body.id === "string" ? body.id.trim() : "";
     if (!id) return NextResponse.json({ error: "Missing `id`." }, { status: 400 });
     const idx = file.transactions.findIndex((t) => t.id === id);
     if (idx < 0) return NextResponse.json({ error: "Transaction not found." }, { status: 404 });
-    const [deleted] = file.transactions.splice(idx, 1);
+    const target = file.transactions[idx]!;
+    const pairId = target.transferPairId?.trim();
+    let deleted: CashTransaction[] = [target];
+    if (pairId) {
+      deleted = file.transactions.filter((t) => t.transferPairId === pairId);
+      file.transactions = file.transactions.filter((t) => t.transferPairId !== pairId);
+    } else {
+      file.transactions.splice(idx, 1);
+    }
     saveCashLedger(file);
     return NextResponse.json({ ok: true, deleted, file });
   }
