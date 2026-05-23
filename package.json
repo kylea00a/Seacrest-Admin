@@ -15,7 +15,8 @@
     "repair:claims": "node scripts/repair-order-claim-dates.mjs",
     "repair:claims:apply": "node scripts/repair-order-claim-dates.mjs --apply",
     "search-index:rebuild": "node scripts/rebuild-orders-search-index.mjs",
-    "sales-summary-cache:rebuild": "node --max-old-space-size=2048 ./node_modules/tsx/dist/cli.mjs scripts/rebuild-sales-summary-cache.ts"
+    "sales-summary-cache:rebuild": "node --max-old-space-size=2048 ./node_modules/tsx/dist/cli.mjs scripts/rebuild-sales-summary-cache.ts",
+    "jnt-tracking:sync": "node scripts/sync-jnt-tracking.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

@@ -19,6 +19,19 @@ type Row = {
   status: BookingStatus;
   updatedAt?: string;
   updatedBy?: string;
+  jntCarrierStatus?: string;
+  jntStatusCode?: string;
+  jntCheckedAt?: string;
+  autoSynced?: boolean;
+};
+
+type SyncResult = {
+  ok?: boolean;
+  provider?: string | null;
+  checked?: number;
+  updated?: number;
+  errors?: Array<{ waybillNumber: string; error: string }>;
+  error?: string;
 };
 
 const STATUS_OPTIONS: Array<{ value: BookingStatus; label: string }> = [
@@ -52,6 +65,8 @@ export default function BookingStatusPage() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | BookingStatus>("pending");
   const [savingWaybill, setSavingWaybill] = useState<string>("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -72,6 +87,33 @@ export default function BookingStatusPage() {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
+
+  const syncFromJnt = async () => {
+    setSyncing(true);
+    setSyncNotice(null);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/jnt-tracking/sync", { method: "POST" });
+      const json = (await res.json()) as SyncResult;
+      if (!res.ok) {
+        const err =
+          json.errors?.[0]?.error ?? json.error ?? `Sync failed (${res.status})`;
+        throw new Error(err);
+      }
+      const msg = json.provider
+        ? `Synced via ${json.provider}: checked ${json.checked ?? 0}, updated ${json.updated ?? 0}.`
+        : "Sync finished.";
+      setSyncNotice(msg);
+      if ((json.errors?.length ?? 0) > 0) {
+        setSyncNotice(`${msg} ${json.errors!.length} error(s) — see server logs.`);
+      }
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const updateStatus = async (waybillNumber: string, status: BookingStatus) => {
     setSavingWaybill(waybillNumber);
@@ -103,9 +145,20 @@ export default function BookingStatusPage() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="admin-title">Booking Status</h1>
-          <div className="admin-muted mt-1">J&amp;T import history with delivery status tracking.</div>
+          <div className="admin-muted mt-1">
+            J&amp;T import history. Use <strong className="font-normal text-zinc-300">Sync from J&amp;T</strong> to
+            pull latest carrier status (daily auto-sync when configured on the server).
+          </div>
         </div>
-        <div className="flex items-end gap-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <button
+            type="button"
+            disabled={syncing}
+            onClick={() => void syncFromJnt()}
+            className="admin-btn-primary px-4 py-2 text-xs disabled:opacity-50"
+          >
+            {syncing ? "Syncing…" : "Sync from J&T"}
+          </button>
           <div>
             <div className="text-xs font-semibold text-zinc-400">Filter</div>
             <select
@@ -124,6 +177,11 @@ export default function BookingStatusPage() {
       </div>
 
       {loading ? <div className="mt-4 text-sm text-zinc-300">Loading…</div> : null}
+      {syncNotice ? (
+        <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+          {syncNotice}
+        </div>
+      ) : null}
       {error ? <div className="admin-alert-error mt-4">{error}</div> : null}
 
       <div className="admin-table-wrap mt-4">
@@ -134,13 +192,14 @@ export default function BookingStatusPage() {
               <th className="px-3 py-2 text-left">Shipping full name</th>
               <th className="px-3 py-2 text-left whitespace-nowrap">Contact number</th>
               <th className="px-3 py-2 text-left whitespace-nowrap">J&amp;T tracking #</th>
+              <th className="px-3 py-2 text-left">Carrier status</th>
               <th className="px-3 py-2 text-right whitespace-nowrap">{headerLabel}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/10">
             {rows.length === 0 ? (
               <tr>
-                <td className="px-3 py-4 text-zinc-500" colSpan={5}>
+                <td className="px-3 py-4 text-zinc-500" colSpan={6}>
                   No rows.
                 </td>
               </tr>
@@ -154,6 +213,16 @@ export default function BookingStatusPage() {
                     <td className="px-3 py-2">{r.receiver || "—"}</td>
                     <td className="px-3 py-2 text-zinc-400">—</td>
                     <td className="px-3 py-2 font-mono text-[11px]">{r.waybillNumber}</td>
+                    <td className="px-3 py-2 text-zinc-400">
+                      <div className="max-w-[14rem] truncate" title={r.jntCarrierStatus || undefined}>
+                        {r.jntCarrierStatus || "—"}
+                      </div>
+                      {r.jntCheckedAt ? (
+                        <div className="mt-0.5 text-[10px] text-zinc-600">
+                          checked {new Date(r.jntCheckedAt).toLocaleString()}
+                        </div>
+                      ) : null}
+                    </td>
                     <td className="px-3 py-2 text-right">
                       <select
                         value={r.status}

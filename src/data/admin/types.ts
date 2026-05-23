@@ -411,6 +411,11 @@ export type BookingStatusRecord = {
   status: BookingStatus;
   updatedAt: string; // ISO
   updatedBy?: string;
+  /** Latest status text from J&T / tracking provider (auto-sync). */
+  jntCarrierStatus?: string;
+  jntStatusCode?: string;
+  jntCheckedAt?: string;
+  autoSynced?: boolean;
 };
 
 export type DeliveryFeeCharge = {

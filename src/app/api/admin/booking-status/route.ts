@@ -61,6 +61,10 @@ export async function GET(req: Request) {
       status: rec.status ?? "pending",
       updatedAt: rec.updatedAt ?? "",
       updatedBy: rec.updatedBy ?? "",
+      jntCarrierStatus: rec.jntCarrierStatus ?? "",
+      jntStatusCode: rec.jntStatusCode ?? "",
+      jntCheckedAt: rec.jntCheckedAt ?? "",
+      autoSynced: Boolean(rec.autoSynced),
     };
   });
 
