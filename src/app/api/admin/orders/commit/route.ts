@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { applyDeliveryClaimsOnImport } from "@/data/admin/autoPickupClaim";
 import { buildBulkSummaryForDay, buildDayParsedFromIndices } from "@/data/admin/ordersBulkSplit";
-import type { OrdersDayParsed } from "@/data/admin/ordersParse";
+import type { OrdersDayParsed, ParsedOrderRow } from "@/data/admin/ordersParse";
 import { deleteOrdersStaging, readOrdersStaging, saveOrdersDay, upsertOrdersIndex } from "@/data/admin/orders";
 import { rebuildOrdersSearchIndexForDatesSync } from "@/data/admin/ordersSearchIndex";
 import { productNamesFromSettings } from "@/data/admin/productSettings";
@@ -56,6 +57,7 @@ export async function POST(req: Request) {
     }
 
     rebuildOrdersSearchIndexForDatesSync(groups.map((g) => g.date));
+    await applyDeliveryClaimsOnImport(fullParsed.rows, importedAt);
     deleteOrdersStaging(token);
     return NextResponse.json({ bulk: true, summaries, count: summaries.length });
   }
@@ -75,6 +77,18 @@ export async function POST(req: Request) {
   saveOrdersDay(date, { summary, sheetName, parsed });
   upsertOrdersIndex(summary);
   rebuildOrdersSearchIndexForDatesSync([date]);
+
+  const importedAt =
+    typeof staging["importedAt"] === "string" ? staging["importedAt"] : summary.importedAt;
+  const parsedRows: ParsedOrderRow[] =
+    typeof parsed === "object" &&
+    parsed !== null &&
+    "rows" in (parsed as Record<string, unknown>) &&
+    Array.isArray((parsed as Record<string, unknown>)["rows"])
+      ? ((parsed as Record<string, unknown>)["rows"] as ParsedOrderRow[])
+      : [];
+  await applyDeliveryClaimsOnImport(parsedRows, importedAt);
+
   deleteOrdersStaging(token);
 
   return NextResponse.json({ summary });
