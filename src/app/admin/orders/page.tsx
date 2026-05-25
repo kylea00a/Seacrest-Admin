@@ -177,6 +177,9 @@ function OrderLineEditForm({
   onClaimDateChange,
   effectiveDateValue,
   onEffectiveDateChange,
+  statusValue,
+  onStatusChange,
+  statusLocked,
   isClaimed,
   onUnclaim,
   unclaiming,
@@ -195,6 +198,10 @@ function OrderLineEditForm({
   /** YYYY-MM-DD for order effective date override (New Edit only). */
   effectiveDateValue: string;
   onEffectiveDateChange: (v: string) => void;
+  /** Order status (New Edit only). Locked when Paid / Complete / Cancelled. */
+  statusValue?: StatusOption;
+  onStatusChange?: (v: StatusOption) => void;
+  statusLocked?: boolean;
   isClaimed?: boolean;
   onUnclaim?: () => void;
   unclaiming?: boolean;
@@ -240,6 +247,28 @@ function OrderLineEditForm({
       ) : null}
       {newEditMode || isClaimed ? (
         <div className="flex flex-wrap items-end gap-3">
+          {newEditMode && statusValue != null && onStatusChange ? (
+            <label className="block text-xs text-zinc-400">
+              Order status
+              <select
+                value={statusValue}
+                onChange={(e) => onStatusChange(e.target.value as StatusOption)}
+                disabled={statusLocked}
+                title={
+                  statusLocked
+                    ? "Paid, Complete, and Cancelled orders cannot change status here."
+                    : "Change status (saved with line changes)."
+                }
+                className={`${inp} ${statusLocked ? "cursor-not-allowed opacity-50" : ""}`}
+              >
+                <option value="Pending">Pending</option>
+                <option value="Processing">Processing</option>
+                <option value="Paid">Paid</option>
+                <option value="Complete">Complete</option>
+                <option value="Cancelled">Cancelled</option>
+              </select>
+            </label>
+          ) : null}
           {newEditMode ? (
             <label className="block text-xs text-zinc-400">
               Order date (effective)
@@ -953,9 +982,29 @@ export default function OrdersPage() {
     const draft = lineEditDrafts[invoiceNumber];
     if (!draft) return;
     const newEditBypass = Boolean(lineEditNewOpen[invoiceNumber]);
+    const row = rows.find((x) => x.invoiceNumber === invoiceNumber);
     setSavingLineEdit(invoiceNumber);
     setError(null);
     try {
+      if (newEditBypass && row && !isTerminalOrderStatus(row.status)) {
+        const nextStatus = statusDraft[invoiceNumber] ?? mapStatusToDraft(row.status);
+        const currentStatus = mapStatusToDraft(row.status);
+        if (nextStatus !== currentStatus) {
+          const statusRes = await fetch("/api/admin/orders/status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              invoiceNumber,
+              status: nextStatus,
+              sourceDate: typeof row.sourceDate === "string" ? row.sourceDate : undefined,
+            }),
+          });
+          const statusJson = (await statusRes.json()) as { ok?: boolean; error?: string };
+          if (!statusRes.ok) {
+            throw new Error(statusJson.error ?? `Status update failed (${statusRes.status})`);
+          }
+        }
+      }
       const parseN = (s: string) => {
         const x = Number(String(s).replace(/,/g, "").trim());
         return Number.isFinite(x) ? x : 0;
@@ -2027,6 +2076,10 @@ export default function OrdersPage() {
                           onClick={() => {
                             setLineEditNewOpen((prev) => ({ ...prev, [inv]: true }));
                             setLineEditOpen((prev) => ({ ...prev, [inv]: false }));
+                            setStatusDraft((prev) => ({
+                              ...prev,
+                              [inv]: mapStatusToDraft(r.status),
+                            }));
                             setClaimDateDrafts((prev) => ({
                               ...prev,
                               [inv]: getClaimCalendarYmd(inv, claims) ?? "",
@@ -2062,6 +2115,11 @@ export default function OrdersPage() {
                           onEffectiveDateChange={(v) =>
                             setEffectiveDateDrafts((prev) => ({ ...prev, [inv]: v }))
                           }
+                          statusValue={statusDraft[inv] ?? mapStatusToDraft(r.status)}
+                          onStatusChange={(v) =>
+                            setStatusDraft((prev) => ({ ...prev, [inv]: v }))
+                          }
+                          statusLocked={isTerminalOrderStatus(r.status)}
                           onChange={(next) =>
                             setLineEditDrafts((prev) => ({ ...prev, [inv]: next }))
                           }
