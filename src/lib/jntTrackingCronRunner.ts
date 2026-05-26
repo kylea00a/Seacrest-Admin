@@ -10,7 +10,12 @@ function cronEnabled(): boolean {
   if (process.env.NODE_ENV === "development" && process.env.JNT_TRACKING_CRON_DEV !== "1") {
     return false;
   }
-  return Boolean(process.env.TRACKINGMORE_API_KEY?.trim() || process.env.TWOCAPTCHA_API_KEY?.trim());
+  return Boolean(
+    process.env.TRACKINGMORE_API_KEY?.trim() ||
+      process.env.TWOCAPTCHA_API_KEY?.trim() ||
+      process.env.CAPSOLVER_API_KEY?.trim() ||
+      (process.env.JNT_TRACKING_VERIFY?.trim() && process.env.JNT_TRACKING_VCK?.trim()),
+  );
 }
 
 function shouldRunDaily(now: Date): boolean {
@@ -34,7 +39,7 @@ async function tick(): Promise<void> {
   running = true;
   lastRunYmd = calendarYmdInTimeZone(new Date(), "Asia/Manila");
   try {
-    const result = await runJntTrackingSync();
+    const result = await runJntTrackingSync({ provider: "official" });
     console.info(
       `[jnt-tracking-cron] provider=${result.provider ?? "none"} checked=${result.checked} updated=${result.updated} errors=${result.errors.length}`,
     );

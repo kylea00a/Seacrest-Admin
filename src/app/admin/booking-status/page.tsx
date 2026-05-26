@@ -93,20 +93,30 @@ export default function BookingStatusPage() {
     setSyncNotice(null);
     setError(null);
     try {
-      const res = await fetch("/api/admin/jnt-tracking/sync", { method: "POST" });
+      const res = await fetch("/api/admin/jnt-tracking/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "official" }),
+      });
       const json = (await res.json()) as SyncResult;
       if (!res.ok) {
         const err =
           json.errors?.[0]?.error ?? json.error ?? `Sync failed (${res.status})`;
         throw new Error(err);
       }
+      const errCount = json.errors?.length ?? 0;
       const msg = json.provider
-        ? `Synced via ${json.provider}: checked ${json.checked ?? 0}, updated ${json.updated ?? 0}.`
+        ? `Synced from J&T website (${json.provider}): checked ${json.checked ?? 0}, updated ${json.updated ?? 0}.`
         : "Sync finished.";
-      setSyncNotice(msg);
-      if ((json.errors?.length ?? 0) > 0) {
-        setSyncNotice(`${msg} ${json.errors!.length} error(s) — see server logs.`);
+      if (errCount > 0 && (json.updated ?? 0) === 0) {
+        const sample = json.errors!.slice(0, 2).map((e) => e.error).join(" · ");
+        throw new Error(
+          errCount === 1
+            ? (json.errors![0]?.error ?? "J&T sync failed.")
+            : `${errCount} waybills failed. ${sample}`,
+        );
       }
+      setSyncNotice(errCount > 0 ? `${msg} ${errCount} warning(s).` : msg);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

@@ -4,18 +4,26 @@ import type { JntTrackingProvider } from "@/lib/jntTrackingProviders/types";
 
 export type { JntTrackLookupResult, JntTrackingProvider } from "@/lib/jntTrackingProviders/types";
 
-export function resolveJntTrackingProvider(): JntTrackingProvider | null {
-  const prefer = (process.env.JNT_TRACKING_PROVIDER ?? "").trim().toLowerCase();
+function hasOfficialJntCredentials(): boolean {
+  return Boolean(
+    process.env.TWOCAPTCHA_API_KEY?.trim() ||
+      process.env.CAPSOLVER_API_KEY?.trim() ||
+      (process.env.JNT_TRACKING_VERIFY?.trim() && process.env.JNT_TRACKING_VCK?.trim()),
+  );
+}
+
+/** @param override `official` | `trackingmore` from API/cron; falls back to env then defaults. */
+export function resolveJntTrackingProvider(override?: string): JntTrackingProvider | null {
+  const prefer = (override ?? process.env.JNT_TRACKING_PROVIDER ?? "").trim().toLowerCase();
 
   const trackingMore = createTrackingMoreProvider();
   const official = createOfficialJntProvider();
 
-  if (prefer === "trackingmore") return trackingMore;
-  if (prefer === "official") return official;
+  if (prefer === "trackingmore") return trackingMore ?? official;
+  if (prefer === "official") return official ?? trackingMore;
 
+  // Default: J&T website when captcha / manual tokens are configured.
+  if (hasOfficialJntCredentials() && official) return official;
   if (trackingMore) return trackingMore;
-  if (official && (process.env.TWOCAPTCHA_API_KEY?.trim() || process.env.JNT_TRACKING_VERIFY?.trim())) {
-    return official;
-  }
-  return trackingMore ?? official;
+  return official;
 }

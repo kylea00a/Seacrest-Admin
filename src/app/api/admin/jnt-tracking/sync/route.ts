@@ -24,26 +24,41 @@ export async function POST(req: Request) {
 
   let waybills: string[] | undefined;
   let force = false;
+  let provider: string | undefined;
   try {
-    const body = (await req.json()) as { waybills?: unknown; force?: unknown };
-    if (Array.isArray(body.waybills)) {
-      waybills = body.waybills.filter((x) => typeof x === "string").map((x) => x.trim()).filter(Boolean);
+    const raw = await req.text();
+    if (raw.trim()) {
+      const body = JSON.parse(raw) as { waybills?: unknown; force?: unknown; provider?: unknown };
+      if (Array.isArray(body.waybills)) {
+        waybills = body.waybills.filter((x) => typeof x === "string").map((x) => x.trim()).filter(Boolean);
+      }
+      force = body.force === true;
+      if (typeof body.provider === "string" && body.provider.trim()) {
+        provider = body.provider.trim();
+      }
     }
-    force = body.force === true;
   } catch {
-    /* empty body ok */
+    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const result = await runJntTrackingSync({ waybills, force });
-  const status = result.provider ? 200 : 503;
+  const result = await runJntTrackingSync({ waybills, force, provider });
+  const status = syncHttpStatus(result);
   return NextResponse.json(result, { status });
+}
+
+function syncHttpStatus(result: Awaited<ReturnType<typeof runJntTrackingSync>>): number {
+  if (!result.provider) return 503;
+  if (!result.ok && result.checked > 0 && result.updated === 0) return 502;
+  return 200;
 }
 
 export async function GET(req: Request) {
   if (!(await isAuthorized(req))) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
-  const result = await runJntTrackingSync();
-  const status = result.provider ? 200 : 503;
+  const url = new URL(req.url);
+  const provider = url.searchParams.get("provider")?.trim() || undefined;
+  const result = await runJntTrackingSync({ provider });
+  const status = syncHttpStatus(result);
   return NextResponse.json(result, { status });
 }

@@ -37,8 +37,10 @@ export async function runJntTrackingSync(args?: {
   /** Only these waybills (normalized). If empty, sync all non-terminal imports. */
   waybills?: string[];
   force?: boolean;
+  /** `official` = jtexpress.ph site API; `trackingmore` = TrackingMore API. */
+  provider?: string;
 }): Promise<JntTrackingSyncResult> {
-  const provider = resolveJntTrackingProvider();
+  const provider = resolveJntTrackingProvider(args?.provider);
   const finishedAt = new Date().toISOString();
 
   if (!provider) {
@@ -52,7 +54,7 @@ export async function runJntTrackingSync(args?: {
         {
           waybillNumber: "",
           error:
-            "No tracking provider configured. Set TRACKINGMORE_API_KEY (recommended) or TWOCAPTCHA_API_KEY for the official J&T site.",
+            "No tracking provider configured. Set TWOCAPTCHA_API_KEY or CAPSOLVER_API_KEY for the official J&T site, or TRACKINGMORE_API_KEY.",
         },
       ],
       finishedAt,
@@ -133,7 +135,7 @@ export async function runJntTrackingSync(args?: {
   saveBookingStatus(booking);
 
   return {
-    ok: errors.length === 0 || updated > 0,
+    ok: errors.length === 0 || updated > 0 || toCheck.length === 0,
     provider: provider.name,
     checked: toCheck.length,
     updated,
