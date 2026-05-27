@@ -52,7 +52,9 @@ export async function POST(req: Request) {
 
   const map = loadOrderAdjustments();
   const existing = map[invoiceNumber];
-  if (existing && isTerminalStatus(existing.status)) {
+  // Non-superadmin: once an adjustment is terminal, prevent changing it.
+  // Superadmin may override status for corrections.
+  if (!auth.isSuperadmin && existing && isTerminalStatus(existing.status)) {
     return NextResponse.json({ error: "Status already finalized for this invoice." }, { status: 400 });
   }
 

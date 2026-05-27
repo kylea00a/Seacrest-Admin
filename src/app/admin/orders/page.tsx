@@ -1930,7 +1930,7 @@ export default function OrdersPage() {
                     )}
                     <td className="px-3 py-2 whitespace-nowrap">
                       {(() => {
-                        const locked = isTerminalOrderStatus(r.status);
+                        const locked = isTerminalOrderStatus(r.status) && !isSuperadmin;
                         if (locked || !canFullOrderEdit) return <span>{r.status}</span>;
                         return (
                           <div className="flex items-center gap-2">
