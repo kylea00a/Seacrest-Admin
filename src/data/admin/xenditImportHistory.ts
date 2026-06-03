@@ -57,7 +57,7 @@ export function loadMergedXenditImportRows(): XenditImportRow[] {
   return out;
 }
 
-/** Latest TRANSACTION amount per normalized invoice (newer imports win on duplicate). */
+/** Latest QRPH amount per normalized invoice (newer imports win on duplicate). */
 export function loadXenditAmountByInvoice(): Map<string, number> {
   const rows = loadMergedXenditImportRows();
   const map = new Map<string, number>();

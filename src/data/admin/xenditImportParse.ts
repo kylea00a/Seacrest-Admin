@@ -50,7 +50,7 @@ function findHeaderRowIndex(lines: string[]): number {
   for (let i = 0; i < Math.min(30, lines.length); i++) {
     const row = splitCsvLine(lines[i] ?? "").map((c) => c.toLowerCase());
     const joined = row.join("\t");
-    if (joined.includes("line type") && joined.includes("reference")) return i;
+    if (joined.includes("payment channel") && joined.includes("reference")) return i;
   }
   return 0;
 }
@@ -69,7 +69,7 @@ export function normalizeXenditInvoiceReference(ref: string): string {
 
 /**
  * Parse Xendit BALANCE_HISTORY_REPORT CSV.
- * Keeps only Line Type = TRANSACTION; filters payment date to [start, end].
+ * Keeps only Payment Channel = QRPH (invoice in Reference); filters payment date to [start, end].
  */
 export function parseXenditCsv(
   text: string,
@@ -81,7 +81,7 @@ export function parseXenditCsv(
   const headerIdx = findHeaderRowIndex(lines);
   const headerRow = splitCsvLine(lines[headerIdx] ?? "").map(normalizeCell);
 
-  const idxLineType = colIndex(headerRow, (h) => /^line\s*type$/i.test(h));
+  const idxPaymentChannel = colIndex(headerRow, (h) => /^payment\s*channel$/i.test(h));
   const idxReference = colIndex(headerRow, (h) => /^reference$/i.test(h));
   const idxAmount = colIndex(headerRow, (h) => /^amount$/i.test(h));
   const idxPayment = colIndex(headerRow, (h) => /payment\s*date/i.test(h));
@@ -89,15 +89,15 @@ export function parseXenditCsv(
   const idxCreated = colIndex(headerRow, (h) => /^created\s*date$/i.test(h) && !/iso/i.test(h));
   const idxCurrency = colIndex(headerRow, (h) => /^currency$/i.test(h));
 
-  if (idxLineType < 0 || idxReference < 0 || idxAmount < 0) return [];
+  if (idxPaymentChannel < 0 || idxReference < 0 || idxAmount < 0) return [];
 
   const out: XenditImportRow[] = [];
   const seen = new Set<string>();
 
   for (let i = headerIdx + 1; i < lines.length; i++) {
     const cells = splitCsvLine(lines[i] ?? "");
-    const lineType = normalizeCell(cells[idxLineType] ?? "").toUpperCase();
-    if (lineType !== "TRANSACTION") continue;
+    const paymentChannel = normalizeCell(cells[idxPaymentChannel] ?? "").toUpperCase();
+    if (paymentChannel !== "QRPH") continue;
 
     const reference = normalizeCell(cells[idxReference] ?? "");
     const invoiceNumber = normalizeXenditInvoiceReference(reference);

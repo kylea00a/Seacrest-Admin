@@ -47,7 +47,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-          "No TRANSACTION rows found in this date range. Check Line Type, Reference, Amount, and Payment Date columns.",
+          "No QRPH rows found in this date range. Check Payment Channel, Reference, Amount, and Payment Date columns.",
       },
       { status: 400 },
     );

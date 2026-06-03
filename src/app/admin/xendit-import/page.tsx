@@ -216,7 +216,7 @@ export default function XenditImportPage() {
       });
       const json = (await res.json()) as { ok?: boolean; rowCount?: number; error?: string };
       if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
-      setImportNotice(`Saved ${json.rowCount ?? 0} TRANSACTION row(s) to Xendit import history.`);
+      setImportNotice(`Saved ${json.rowCount ?? 0} QRPH row(s) to Xendit import history.`);
       clearStaging();
       setFile(null);
       await loadList();
@@ -300,7 +300,7 @@ export default function XenditImportPage() {
         <div className="admin-card">
           <h1 className="admin-title">Xendit Transactions</h1>
           <p className="admin-muted mt-1">
-            Upload Xendit balance history CSV. Only rows with <strong className="font-normal text-zinc-300">Line Type = TRANSACTION</strong>{" "}
+            Upload Xendit balance history CSV. Only rows with <strong className="font-normal text-zinc-300">Payment Channel = QRPH</strong>{" "}
             are saved. Matching uses the <strong className="font-normal text-zinc-300">Reference</strong> invoice number on Sales
             Report.
           </p>
@@ -355,7 +355,7 @@ export default function XenditImportPage() {
             <div className="mt-4 text-xs text-zinc-500">Loading saved imports…</div>
           ) : (
             <div className="mt-4 text-xs text-zinc-500">
-              Merged TRANSACTION rows for Sales Report:{" "}
+              Merged QRPH rows for Sales Report:{" "}
               <span className="font-semibold text-zinc-300">{mergedRowCount.toLocaleString()}</span>
             </div>
           )}
@@ -373,7 +373,7 @@ export default function XenditImportPage() {
             <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-4">
               <div className="text-sm font-semibold text-white">Preview (not saved yet)</div>
               <div className="mt-1 text-xs text-zinc-400">
-                {previewMeta.filename} • {totalRows.toLocaleString()} TRANSACTION rows • {previewMeta.startDate} →{" "}
+                {previewMeta.filename} • {totalRows.toLocaleString()} QRPH rows • {previewMeta.startDate} →{" "}
                 {previewMeta.endDate}
               </div>
               <div className="mt-4 flex flex-wrap gap-3">

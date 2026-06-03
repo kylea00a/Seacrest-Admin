@@ -176,7 +176,7 @@ export default function SalesReportPage() {
     deliveryFee: number;
     deliveryFeeOthers: number;
     repurchaseTotal: number;
-    /** Matched Xendit TRANSACTION amounts + delivery fee (Others) for this day. */
+    /** Matched Xendit QRPH amounts + delivery fee (Others) for this day. */
     actualReceived: number;
   };
 
@@ -538,7 +538,7 @@ export default function SalesReportPage() {
             </table>
           </div>
           <div className="mt-2 text-xs text-zinc-500">
-            Actual = matched Xendit TRANSACTION rows (by invoice) + delivery fee (Others) for that day.
+            Actual = matched Xendit QRPH rows (by invoice) + delivery fee (Others) for that day.
           </div>
         </div>
 

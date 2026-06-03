@@ -393,7 +393,7 @@ export interface JntImportIndexEntry {
   rowCount: number;
 }
 
-/** One TRANSACTION row from Xendit balance history CSV (Line Type = TRANSACTION). */
+/** One QRPH payment row from Xendit balance history CSV (Payment Channel = QRPH, invoice in Reference). */
 export interface XenditImportRow {
   id: string;
   /** Invoice from Reference column (e.g. INV-95912020552800001). */
