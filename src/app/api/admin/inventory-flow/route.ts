@@ -3,8 +3,12 @@ import { randomUUID } from "crypto";
 import { loadAdminSettings, loadInventoryFlow, loadInventoryRtsIn, saveInventoryRtsIn } from "@/data/admin/storage";
 import type { InventoryRtsInEntry } from "@/data/admin/types";
 import { requireApiPermission } from "@/lib/adminApiAuth";
+import {
+  computeClaimedOutDetailsForRange,
+  groupOutDetailsByDay,
+} from "@/data/admin/inventoryCompute";
 import { addDaysYmd } from "@/lib/inventoryBeginning";
-import { syncInventoryFlowDay, syncInventoryFlowRange } from "@/lib/inventoryFlow";
+import { calcFlowEnding, syncInventoryFlowDay, syncInventoryFlowRange } from "@/lib/inventoryFlow";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -45,10 +49,24 @@ export async function GET(req: Request) {
   const settings = loadAdminSettings();
   const productNames = settings.products.map((p) => p.name);
   const flow = loadInventoryFlow();
+  const outByDay = groupOutDetailsByDay(await computeClaimedOutDetailsForRange(start, end));
   const rows = [];
   for (let d = start; d <= end; d = addDaysYmd(d, 1)) {
     const row = flow.byDate?.[d] ?? null;
-    rows.push(row ? { ...row } : { date: d, missing: true });
+    if (!row) {
+      rows.push({ date: d, missing: true });
+      continue;
+    }
+    const out = outByDay[d] ?? {};
+    const beginning = row.beginning ?? {};
+    const delivery = row.delivery ?? {};
+    const rtsIn = row.rtsIn ?? {};
+    const adjustment = row.adjustment ?? {};
+    rows.push({
+      ...row,
+      out,
+      ending: calcFlowEnding(beginning, delivery, rtsIn, adjustment, out, productNames),
+    });
   }
 
   return NextResponse.json({

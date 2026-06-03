@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { computeClaimedOutDetailsForRange } from "@/data/admin/inventoryCompute";
+import {
+  aggregateOutDetailsToTotals,
+  computeClaimedOutDetailsForRange,
+} from "@/data/admin/inventoryCompute";
+import { calcFlowEnding } from "@/lib/inventoryFlow";
 import {
   loadAdminSettings,
   loadInventoryAdjustments,
@@ -93,7 +97,8 @@ export async function GET(req: Request) {
   const deliveryInPeriod = flowRow.delivery;
   const rtsInPeriod = flowRow.rtsIn;
   const adjustmentPeriod = flowRow.adjustment ?? {};
-  const outPeriod = flowRow.out;
+  const outDetailsForRange = await computeClaimedOutDetailsForRange(start, end);
+  const outPeriod = aggregateOutDetailsToTotals(outDetailsForRange);
 
   const allKeys = new Set<string>([
     ...productNames,
@@ -129,7 +134,14 @@ export async function GET(req: Request) {
   const canEditEncodedEnding =
     !endingRec?.locked || (auth.isSuperadmin && Boolean(settings.allowSuperadminEditEncodedInventory));
 
-  const expectedEndingBy = flowRow.ending;
+  const expectedEndingBy = calcFlowEnding(
+    flowRow.beginning,
+    deliveryInPeriod,
+    rtsInPeriod,
+    adjustmentPeriod,
+    outPeriod,
+    productNames,
+  );
   const discrepancyBy: Record<string, number> = {};
   for (const r of rows) {
     if (endingRec?.counts) {

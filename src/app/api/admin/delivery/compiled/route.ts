@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { mergeOrderRowWithAdjustment } from "@/data/admin/orderAdjustmentMerge";
 import { getClaimCalendarYmd, isNonPickupDelivery } from "@/data/admin/orderClaim";
-import { readOrdersDayAsync } from "@/data/admin/orders";
+import { lookupOrderRecordsByInvoices } from "@/data/admin/inventoryCompute";
 import { resolvePackageNameFromPrice } from "@/data/admin/packageResolve";
-import { loadAdminSettings, loadOrderAdjustments, loadOrderClaims, loadOrdersIndex } from "@/data/admin/storage";
+import { loadAdminSettings, loadOrderAdjustments, loadOrderClaims } from "@/data/admin/storage";
 import { requireApiPermission } from "@/lib/adminApiAuth";
 
 export const dynamic = "force-dynamic";
@@ -53,82 +53,55 @@ export async function GET(req: Request) {
   const start = startRaw <= endRaw ? startRaw : endRaw;
   const end = startRaw <= endRaw ? endRaw : startRaw;
 
-  // 1) Build the set of invoices whose claim calendar day is within [start, end].
   const claims = loadOrderClaims();
-  const need = new Set<string>();
+  const need: string[] = [];
   for (const inv of Object.keys(claims)) {
     const day = getClaimCalendarYmd(inv, claims);
-    if (day && day >= start && day <= end) need.add(inv);
+    if (day && day >= start && day <= end) need.push(inv);
   }
 
-  if (need.size === 0) {
+  if (need.length === 0) {
     return NextResponse.json({ rows: [], count: 0, start, end });
   }
 
-  const index = loadOrdersIndex();
   const adjustments = loadOrderAdjustments();
   const packages = loadAdminSettings().packages;
-
-  const dates = [...new Set(index.map((i) => i.date))].sort((a, b) => b.localeCompare(a));
+  const lookedUp = await lookupOrderRecordsByInvoices(need);
   const out: Array<Record<string, unknown>> = [];
 
-  // 2) Scan import days newest→oldest until we find all needed invoices.
-  for (const sourceDate of dates) {
-    if (need.size === 0) break;
-    const dayUnknown = await readOrdersDayAsync(sourceDate);
-    const day =
-      typeof dayUnknown === "object" && dayUnknown !== null ? (dayUnknown as Record<string, unknown>) : null;
-    const parsed =
-      day && typeof day["parsed"] === "object" && day["parsed"] !== null ? (day["parsed"] as Record<string, unknown>) : null;
-    const parsedRows = parsed?.["rows"];
-    if (!Array.isArray(parsedRows)) continue;
+  for (const invoiceNumber of need) {
+    const found = lookedUp[invoiceNumber];
+    if (!found) continue;
 
-    for (const r of parsedRows) {
-      if (need.size === 0) break;
-      if (typeof r !== "object" || r === null) continue;
-      const rec = r as Record<string, unknown>;
-      const invoiceNumber = typeof rec["invoiceNumber"] === "string" ? rec["invoiceNumber"].trim() : "";
-      if (!invoiceNumber || !need.has(invoiceNumber)) continue;
+    const adj = adjustments[invoiceNumber];
+    const mergedRec = mergeOrderRowWithAdjustment(found.rec as Record<string, unknown>, adj);
+    const status = adj?.status ?? (typeof mergedRec["status"] === "string" ? (mergedRec["status"] as string) : "");
+    const isPaid = paidFromStatus(status);
+    const dm =
+      typeof mergedRec["deliveryMethod"] === "string" ? (mergedRec["deliveryMethod"] as string).trim() : "";
+    if (!isPaid || !isNonPickupDelivery(dm)) continue;
 
-      // Ensure we only return paid delivery rows for Delivery schedule.
-      const adj = adjustments[invoiceNumber];
-      const mergedRec = mergeOrderRowWithAdjustment(rec as Record<string, unknown>, adj);
-      const status = adj?.status ?? (typeof mergedRec["status"] === "string" ? (mergedRec["status"] as string) : "");
-      const isPaid = paidFromStatus(status);
-      const dm =
-        typeof mergedRec["deliveryMethod"] === "string" ? (mergedRec["deliveryMethod"] as string).trim() : "";
-      if (!isPaid || !isNonPickupDelivery(dm)) {
-        need.delete(invoiceNumber);
-        continue;
-      }
+    const packageNameRaw =
+      typeof mergedRec["packageName"] === "string" ? (mergedRec["packageName"] as string).trim() : "";
+    const pkgPriceFromRow = parsePrice(mergedRec["packagePrice"]);
+    const pkgPriceFromCode = priceFromPackageCode(packageNameRaw);
+    const packagePrice = pkgPriceFromRow || pkgPriceFromCode;
+    const resolvedPackageName = resolvePackageNameFromPrice(packagePrice, packages);
+    const packageName = resolvedPackageName || packageNameRaw;
+    const effectiveDate = adj?.effectiveDate ?? found.sourceDate;
 
-      const packageNameRaw =
-        typeof mergedRec["packageName"] === "string" ? (mergedRec["packageName"] as string).trim() : "";
-      const pkgPriceFromRow = parsePrice(mergedRec["packagePrice"]);
-      const pkgPriceFromCode = priceFromPackageCode(packageNameRaw);
-      const packagePrice = pkgPriceFromRow || pkgPriceFromCode;
-      const resolvedPackageName = resolvePackageNameFromPrice(packagePrice, packages);
-      const packageName = resolvedPackageName || packageNameRaw;
-
-      // Keep `date` compatible with existing compiled consumers (effective date).
-      const effectiveDate = adj?.effectiveDate ?? sourceDate;
-
-      out.push({
-        ...mergedRec,
-        packagePrice,
-        packageName,
-        date: effectiveDate,
-        sourceDate,
-        status,
-        isPaid,
-        adjusted: !!adj,
-      });
-
-      need.delete(invoiceNumber);
-    }
+    out.push({
+      ...mergedRec,
+      packagePrice,
+      packageName,
+      date: effectiveDate,
+      sourceDate: found.sourceDate,
+      status,
+      isPaid,
+      adjusted: !!adj,
+    });
   }
 
-  // Stable-ish sort: claim-day is the schedule dimension, but we still sort by effective date desc + rowIndex.
   out.sort((a, b) => {
     const da = String(a["date"] ?? "");
     const db = String(b["date"] ?? "");
@@ -141,4 +114,3 @@ export async function GET(req: Request) {
 
   return NextResponse.json({ rows: out, count: out.length, start, end });
 }
-

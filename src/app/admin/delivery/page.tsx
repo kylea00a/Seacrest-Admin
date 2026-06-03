@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AdminSettings, JntImportFile, OrdersImportSummary } from "@/data/admin/types";
+import type { AdminSettings, JntImportFile } from "@/data/admin/types";
 import {
   courierBucket,
   isPaidDeliveryOrder,
@@ -59,7 +59,6 @@ function trackingDisplayForGroup(
 
 export default function DeliveryPage() {
   const productKeys = useAdminProductKeys();
-  const [index, setIndex] = useState<OrdersImportSummary[]>([]);
   const [settings, setSettings] = useState<AdminSettings | null>(null);
   const [startDate, setStartDate] = useState(todayISO());
   const [endDate, setEndDate] = useState(todayISO());
@@ -79,13 +78,6 @@ export default function DeliveryPage() {
     return m;
   }, [settings]);
 
-  const loadIndex = async () => {
-    const res = await fetch("/api/admin/orders", { cache: "no-store" });
-    const json = (await res.json()) as { index?: OrdersImportSummary[]; error?: string };
-    if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
-    setIndex(json.index ?? []);
-  };
-
   const loadSettings = async () => {
     const res = await fetch("/api/admin/settings", { cache: "no-store" });
     const json = (await res.json()) as { settings?: AdminSettings; error?: string };
@@ -100,7 +92,7 @@ export default function DeliveryPage() {
     setTracking(json.tracking ?? {});
   };
 
-  const loadJntImport = async () => {
+  const loadJntImport = useCallback(async () => {
     const res = await fetch("/api/admin/jnt-import", { cache: "no-store" });
     const json = (await res.json()) as JntImportFile & { imports?: unknown; error?: string };
     if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
@@ -109,19 +101,16 @@ export default function DeliveryPage() {
       filename: json.filename,
       rows: json.rows ?? [],
     });
-  };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     async function run() {
-      setLoading(true);
       setError(null);
       try {
-        await Promise.all([loadIndex(), loadSettings(), loadTracking(), loadJntImport()]);
+        await Promise.all([loadSettings(), loadTracking()]);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     }
     void run();
@@ -130,8 +119,13 @@ export default function DeliveryPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (courierFilter !== "jt" && !jntExportEnabled) return;
+    void loadJntImport();
+  }, [courierFilter, jntExportEnabled, loadJntImport]);
+
   const refetchRows = useCallback(async () => {
-    if (!index.length || !startDate || !endDate) {
+    if (!startDate || !endDate) {
       setGroups([]);
       return;
     }
@@ -153,13 +147,12 @@ export default function DeliveryPage() {
       });
       const merged = mergeDeliveryRowsByReceiver(filtered as DeliveryRowLike[], productKeys);
       setGroups(merged);
-      await loadTracking();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, index.length, productKeys, courierFilter]);
+  }, [startDate, endDate, productKeys, courierFilter]);
 
   useEffect(() => {
     void refetchRows();
@@ -191,6 +184,7 @@ export default function DeliveryPage() {
   const exportJntExcel = async () => {
     if (courierFilter !== "jt" || !jntExportEnabled || !settings) return;
     try {
+      if (!jntImport?.rows?.length) await loadJntImport();
       const { buildJntExpressWorkbookBuffer } = await import("@/lib/jntExpressExport");
       const exportRows = groups.map((g) => ({
         receiver: g.shippingFullName,

@@ -72,6 +72,16 @@ function matchInvoicesInDayFile(
   }
 }
 
+/** Resolve invoice → order row (uses effectiveDate hint, then index scan). */
+export async function lookupOrderRecordsByInvoices(
+  invoiceNumbers: string[],
+): Promise<Record<string, { sourceDate: string; rec: Record<string, unknown> }>> {
+  const adjustments = loadOrderAdjustments();
+  const index = loadOrdersIndex();
+  const allIndexDates = [...new Set(index.map((i) => i.date))];
+  return bulkLookupInvoicesParsedRows(invoiceNumbers, adjustments, allIndexDates);
+}
+
 async function bulkLookupInvoicesParsedRows(
   invoiceNumbers: string[],
   adjustments: OrderAdjustmentsMap,
@@ -181,138 +191,6 @@ export async function computeClaimedOutTotals(): Promise<InventoryOutTotals> {
       addRec(merged["subscriptionProducts"]);
       addRec(merged["repurchaseProducts"]);
     }
-  }
-
-  return out;
-}
-
-/**
- * Same as {@link computeClaimedOutTotals} but only rows whose effective date falls in [start, end] (YYYY-MM-DD).
- *
- * Only reads import-day files whose **source date** is in [start, end] (same as `/api/admin/orders/compiled`),
- * so a single-day inventory query touches at most those day files — not the full history.
- */
-export async function computeClaimedOutTotalsForRange(start: string, end: string): Promise<InventoryOutTotals> {
-  const index = loadOrdersIndex();
-  const adjustments = loadOrderAdjustments();
-  const claims = loadOrderClaims();
-
-  const out: InventoryOutTotals = {};
-  const seenInvoices = new Set<string>();
-
-  const add = (name: string, n: number) => {
-    if (!name || !Number.isFinite(n) || n <= 0) return;
-    out[name] = (out[name] ?? 0) + n;
-  };
-
-  const allIndexDates = [...new Set(index.map((i) => i.date))];
-  const datesToScan = allIndexDates.filter((d) => d >= start && d <= end);
-  const claimsByYmd = buildClaimsByInventoryYmd(claims as OrderClaimsMap);
-
-  const dayPayloads = await Promise.all(
-    datesToScan.map(async (sourceDate) => {
-      const dayUnknown = await readOrdersDayAsync(sourceDate);
-      return { sourceDate, dayUnknown };
-    }),
-  );
-
-  for (const { sourceDate, dayUnknown } of dayPayloads) {
-    const day =
-      typeof dayUnknown === "object" && dayUnknown !== null
-        ? (dayUnknown as Record<string, unknown>)
-        : null;
-    const parsed =
-      day && typeof day["parsed"] === "object" && day["parsed"] !== null
-        ? (day["parsed"] as Record<string, unknown>)
-        : null;
-    const parsedRows = parsed?.["rows"];
-    if (!Array.isArray(parsedRows)) continue;
-
-    for (const r of parsedRows) {
-      if (typeof r !== "object" || r === null) continue;
-      const rec = r as Record<string, unknown>;
-      const invoiceNumber = typeof rec["invoiceNumber"] === "string" ? (rec["invoiceNumber"] as string).trim() : "";
-      if (!invoiceNumber) continue;
-
-      const adj = adjustments[invoiceNumber];
-      const merged = mergeOrderRowWithAdjustment(rec as Record<string, unknown>, adj);
-      const effectiveDate = adj?.effectiveDate ?? sourceDate;
-      const claimYmd = fastClaimYmd(invoiceNumber, claims as OrderClaimsMap);
-      const inventoryDay = claimYmd ?? effectiveDate;
-      if (inventoryDay < start || inventoryDay > end) continue;
-
-      const status = adj?.status ?? (typeof merged["status"] === "string" ? (merged["status"] as string) : "");
-      const deliveryMethod =
-        typeof merged["deliveryMethod"] === "string" ? (merged["deliveryMethod"] as string).trim() : "";
-
-      if (
-        !isOrderClaimedForInventory({
-          deliveryMethod,
-          status,
-          invoiceNumber,
-          claims: claims as OrderClaimsMap,
-        })
-      ) {
-        continue;
-      }
-
-      const addRec = (obj: unknown) => {
-        if (!obj || typeof obj !== "object") return;
-        const o = obj as Record<string, unknown>;
-        for (const [k, v] of Object.entries(o)) {
-          const n = typeof v === "number" ? v : Number(v);
-          if (Number.isFinite(n) && n > 0) add(k, n);
-        }
-      };
-
-      addRec(merged["packageProducts"]);
-      addRec(merged["subscriptionProducts"]);
-      addRec(merged["repurchaseProducts"]);
-      seenInvoices.add(invoiceNumber);
-    }
-  }
-
-  // Orders claimed on a later day than their import day (index by claim day, not full claims scan).
-  const invoicesToLookup = collectCrossDayClaimInvoices(start, end, seenInvoices, claimsByYmd);
-
-  const lookedUp = await bulkLookupInvoicesParsedRows(invoicesToLookup, adjustments, allIndexDates);
-  for (const invoiceNumber of invoicesToLookup) {
-    if (seenInvoices.has(invoiceNumber)) continue;
-    const claimYmd = fastClaimYmd(invoiceNumber, claims as OrderClaimsMap);
-    if (!claimYmd) continue;
-    const found = lookedUp[invoiceNumber];
-    if (!found) continue;
-    const adj = adjustments[invoiceNumber];
-    const merged = mergeOrderRowWithAdjustment(found.rec as Record<string, unknown>, adj);
-
-    const status = adj?.status ?? (typeof merged["status"] === "string" ? (merged["status"] as string) : "");
-    const deliveryMethod =
-      typeof merged["deliveryMethod"] === "string" ? (merged["deliveryMethod"] as string).trim() : "";
-
-    if (
-      !isOrderClaimedForInventory({
-        deliveryMethod,
-        status,
-        invoiceNumber,
-        claims: claims as OrderClaimsMap,
-      })
-    ) {
-      continue;
-    }
-
-    const addRec = (obj: unknown) => {
-      if (!obj || typeof obj !== "object") return;
-      const o = obj as Record<string, unknown>;
-      for (const [k, v] of Object.entries(o)) {
-        const n = typeof v === "number" ? v : Number(v);
-        if (Number.isFinite(n) && n > 0) add(k, n);
-      }
-    };
-
-    addRec(merged["packageProducts"]);
-    addRec(merged["subscriptionProducts"]);
-    addRec(merged["repurchaseProducts"]);
-    seenInvoices.add(invoiceNumber);
   }
 
   return out;
@@ -503,6 +381,42 @@ export async function computeClaimedOutDetailsForRange(
   });
 
   return out;
+}
+
+/** Sum per-order OUT lines (same source as the Out-by-order list). */
+export function aggregateOutDetailsToTotals(details: InventoryOutOrderDetail[]): InventoryOutTotals {
+  const out: InventoryOutTotals = {};
+  for (const order of details) {
+    for (const line of order.lines) {
+      if (!line.productName || !Number.isFinite(line.qty) || line.qty <= 0) continue;
+      out[line.productName] = (out[line.productName] ?? 0) + line.qty;
+    }
+  }
+  return out;
+}
+
+/** Group Out-by-order lines by claim calendar day (effectiveDate). */
+export function groupOutDetailsByDay(details: InventoryOutOrderDetail[]): Record<string, InventoryOutTotals> {
+  const byDay: Record<string, InventoryOutTotals> = {};
+  for (const order of details) {
+    const d = order.effectiveDate;
+    if (!byDay[d]) byDay[d] = {};
+    const bucket = byDay[d]!;
+    for (const line of order.lines) {
+      if (!line.productName || !Number.isFinite(line.qty) || line.qty <= 0) continue;
+      bucket[line.productName] = (bucket[line.productName] ?? 0) + line.qty;
+    }
+  }
+  return byDay;
+}
+
+/**
+ * Product totals for OUT — derived from {@link computeClaimedOutDetailsForRange} so
+ * Inventory Flow and product-flow OUT always match Out-by-order.
+ */
+export async function computeClaimedOutTotalsForRange(start: string, end: string): Promise<InventoryOutTotals> {
+  const details = await computeClaimedOutDetailsForRange(start, end);
+  return aggregateOutDetailsToTotals(details);
 }
 
 export type InventoryOutByChannel = {

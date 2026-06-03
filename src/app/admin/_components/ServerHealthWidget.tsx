@@ -14,6 +14,10 @@ type Stats = {
     load5: number;
     load15: number;
     cpuCount: number;
+    loadPct: number;
+    diskTotalMB: number;
+    diskUsedMB: number;
+    diskUsedPct: number;
     platform: string;
   };
 };
@@ -84,19 +88,32 @@ export default function ServerHealthWidget() {
     if (!stats) return null;
     const osUsedPct = stats.os.totalMB > 0 ? Math.round((stats.os.usedMB / stats.os.totalMB) * 100) : 0;
     const nodeRssPct = stats.os.totalMB > 0 ? Math.round((stats.node.rssMB / stats.os.totalMB) * 100) : 0;
+    const cpuPct = stats.os.loadPct ?? 0;
+    const diskPct = stats.os.diskUsedPct ?? 0;
 
     const warnMem = osUsedPct >= 90 || nodeRssPct >= 35;
+    const warnCpu = cpuPct >= 85;
+    const warnDisk = diskPct >= 90;
     const warnLoad = stats.os.cpuCount > 0 ? stats.os.load1 >= stats.os.cpuCount * 1.25 : stats.os.load1 >= 2;
     const warnLatency = (latencyMs ?? 0) >= 1200;
     const ok =
-      !stale &&
-      !error &&
-      !warnMem &&
-      !warnLoad &&
-      !warnLatency;
+      !stale && !error && !warnMem && !warnCpu && !warnDisk && !warnLoad && !warnLatency;
 
-    const severity = ok ? "ok" : warnMem || warnLatency || stale ? "bad" : "warn";
-    return { osUsedPct, nodeRssPct, warnMem, warnLoad, warnLatency, ok, severity };
+    const severity =
+      ok ? "ok" : warnMem || warnDisk || warnLatency || warnCpu || stale ? "bad" : "warn";
+    return {
+      osUsedPct,
+      nodeRssPct,
+      cpuPct,
+      diskPct,
+      warnMem,
+      warnCpu,
+      warnDisk,
+      warnLoad,
+      warnLatency,
+      ok,
+      severity,
+    };
   }, [stats, latencyMs, error, stale]);
 
   const severityClass =
@@ -110,7 +127,7 @@ export default function ServerHealthWidget() {
     <div className="fixed bottom-4 right-4 z-40">
       <div
         className={cx(
-          "w-[220px] rounded-xl border p-2 shadow-[0_18px_60px_-24px_rgba(0,0,0,0.75)] backdrop-blur-xl",
+          "w-[240px] rounded-xl border p-2 shadow-[0_18px_60px_-24px_rgba(0,0,0,0.75)] backdrop-blur-xl",
           "ring-1 ring-white/[0.035]",
           severityClass,
         )}
@@ -146,16 +163,40 @@ export default function ServerHealthWidget() {
           </div>
         </div>
 
-        <div className="mt-2 grid grid-cols-2 gap-1.5 text-[11px]">
+        <div className="mt-2 grid grid-cols-3 gap-1.5 text-[11px]">
+          <div className="rounded-lg border border-white/10 bg-black/10 p-1.5">
+            <div className="text-[10px] font-semibold text-zinc-400/90">CPU</div>
+            <div
+              className={cx(
+                "mt-0.5 font-mono text-[11px]",
+                derived?.warnCpu || derived?.warnLoad ? "text-amber-200" : "text-zinc-100",
+              )}
+            >
+              {stats && derived ? `${derived.cpuPct}%` : "—"}
+            </div>
+            <div className="mt-0.5 text-[9px] text-zinc-500">
+              {stats ? `load ${stats.os.load1}/${stats.os.cpuCount}` : ""}
+            </div>
+          </div>
+          <div className="rounded-lg border border-white/10 bg-black/10 p-1.5">
+            <div className="text-[10px] font-semibold text-zinc-400/90">Disk</div>
+            <div
+              className={cx(
+                "mt-0.5 font-mono text-[11px]",
+                derived?.warnDisk ? "text-red-200" : "text-zinc-100",
+              )}
+            >
+              {stats && derived ? `${derived.diskPct}%` : "—"}
+            </div>
+            <div className="mt-0.5 text-[9px] text-zinc-500">
+              {stats?.os.diskTotalMB ? `${stats.os.diskUsedMB}/${stats.os.diskTotalMB} MB` : ""}
+            </div>
+          </div>
           <div className="rounded-lg border border-white/10 bg-black/10 p-1.5">
             <div className="text-[10px] font-semibold text-zinc-400/90">Latency</div>
             <div className={cx("mt-0.5 font-mono text-[11px]", derived?.warnLatency ? "text-red-200" : "text-zinc-100")}>
               {latencyMs != null ? `${latencyMs} ms` : "—"}
             </div>
-          </div>
-          <div className="rounded-lg border border-white/10 bg-black/10 p-1.5">
-            <div className="text-[10px] font-semibold text-zinc-400/90">Uptime</div>
-            <div className="mt-0.5 font-mono text-[11px] text-zinc-100">{stats ? fmtUptime(stats.uptimeSec) : "—"}</div>
           </div>
           <div className="rounded-lg border border-white/10 bg-black/10 p-1.5">
             <div className="text-[10px] font-semibold text-zinc-400/90">RAM (sys)</div>
@@ -166,21 +207,15 @@ export default function ServerHealthWidget() {
           <div className="rounded-lg border border-white/10 bg-black/10 p-1.5">
             <div className="text-[10px] font-semibold text-zinc-400/90">RAM (app)</div>
             <div className="mt-0.5 font-mono text-[11px] text-zinc-100">
-              {stats && derived ? `${stats.node.rssMB} MB (${derived.nodeRssPct}%)` : "—"}
+              {stats && derived ? `${stats.node.rssMB} MB` : "—"}
             </div>
           </div>
-        </div>
-
-        <div className="mt-1.5 flex items-center justify-between text-[10px] text-zinc-500/90">
-          <div className={cx(derived?.warnLoad ? "text-amber-200" : "")}>
-            Load: {stats ? `${stats.os.load1} / ${stats.os.cpuCount} CPU` : "—"}
-          </div>
-          <div className="truncate">
-            {stats ? `${stats.os.platform}` : ""}
+          <div className="rounded-lg border border-white/10 bg-black/10 p-1.5">
+            <div className="text-[10px] font-semibold text-zinc-400/90">Uptime</div>
+            <div className="mt-0.5 font-mono text-[11px] text-zinc-100">{stats ? fmtUptime(stats.uptimeSec) : "—"}</div>
           </div>
         </div>
       </div>
     </div>
   );
 }
-
