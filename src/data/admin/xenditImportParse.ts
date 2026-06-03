@@ -1,5 +1,10 @@
 import type { XenditImportRow } from "./types";
 
+/** Xendit balance history CSV column letters (0-based): E = channel, F = reference, H = amount. */
+const COL_PAYMENT_CHANNEL = 4;
+const COL_REFERENCE = 5;
+const COL_AMOUNT = 7;
+
 function shortHash(s: string): string {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
@@ -14,15 +19,6 @@ function parseAmount(v: string): number {
   const s = v.replace(/,/g, "").trim();
   const n = Number(s);
   return Number.isFinite(n) ? n : 0;
-}
-
-/** Extract YYYY-MM-DD from ISO or "28 May 2023, 22:31:29" style. */
-function parseYmdFromCell(v: string): string {
-  const s = normalizeCell(v);
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-  const d = new Date(s);
-  if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-  return "";
 }
 
 function splitCsvLine(line: string): string[] {
@@ -50,13 +46,33 @@ function findHeaderRowIndex(lines: string[]): number {
   for (let i = 0; i < Math.min(30, lines.length); i++) {
     const row = splitCsvLine(lines[i] ?? "").map((c) => c.toLowerCase());
     const joined = row.join("\t");
-    if (joined.includes("payment channel") && joined.includes("reference")) return i;
+    if (joined.includes("payment channel") && joined.includes("reference") && joined.includes("amount")) {
+      return i;
+    }
   }
   return 0;
 }
 
 function colIndex(headerRow: string[], pred: (h: string) => boolean): number {
   return headerRow.findIndex((h) => pred(h));
+}
+
+function resolveEfhIndices(headerRow: string[]): {
+  idxPaymentChannel: number;
+  idxReference: number;
+  idxAmount: number;
+} {
+  const idxPaymentChannel = colIndex(headerRow, (h) => /^payment\s*channel$/i.test(h));
+  const idxReference = colIndex(headerRow, (h) => /^reference$/i.test(h));
+  const idxAmount = colIndex(headerRow, (h) => /^amount$/i.test(h));
+  if (idxPaymentChannel >= 0 && idxReference >= 0 && idxAmount >= 0) {
+    return { idxPaymentChannel, idxReference, idxAmount };
+  }
+  return {
+    idxPaymentChannel: COL_PAYMENT_CHANNEL,
+    idxReference: COL_REFERENCE,
+    idxAmount: COL_AMOUNT,
+  };
 }
 
 /** Normalize invoice reference for matching orders (INV-…). */
@@ -68,34 +84,29 @@ export function normalizeXenditInvoiceReference(ref: string): string {
 }
 
 /**
- * Parse Xendit BALANCE_HISTORY_REPORT CSV.
- * Keeps only Payment Channel = QRPH (invoice in Reference); filters payment date to [start, end].
+ * Parse Xendit BALANCE_HISTORY_REPORT CSV using only columns E, F, H.
+ * Keeps rows where E (Payment Channel) = QRPH; F = invoice reference; H = amount.
+ * `range` is stored on the import file (upload date range), not used to filter rows.
  */
 export function parseXenditCsv(
   text: string,
-  range: { start: string; end: string },
+  _range: { start: string; end: string },
 ): XenditImportRow[] {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
   if (lines.length < 2) return [];
 
   const headerIdx = findHeaderRowIndex(lines);
   const headerRow = splitCsvLine(lines[headerIdx] ?? "").map(normalizeCell);
-
-  const idxPaymentChannel = colIndex(headerRow, (h) => /^payment\s*channel$/i.test(h));
-  const idxReference = colIndex(headerRow, (h) => /^reference$/i.test(h));
-  const idxAmount = colIndex(headerRow, (h) => /^amount$/i.test(h));
-  const idxPayment = colIndex(headerRow, (h) => /payment\s*date/i.test(h));
-  const idxCreatedIso = colIndex(headerRow, (h) => /created\s*date\s*iso/i.test(h));
-  const idxCreated = colIndex(headerRow, (h) => /^created\s*date$/i.test(h) && !/iso/i.test(h));
-  const idxCurrency = colIndex(headerRow, (h) => /^currency$/i.test(h));
-
-  if (idxPaymentChannel < 0 || idxReference < 0 || idxAmount < 0) return [];
+  const { idxPaymentChannel, idxReference, idxAmount } = resolveEfhIndices(headerRow);
 
   const out: XenditImportRow[] = [];
   const seen = new Set<string>();
 
   for (let i = headerIdx + 1; i < lines.length; i++) {
     const cells = splitCsvLine(lines[i] ?? "");
+    const minCols = Math.max(idxPaymentChannel, idxReference, idxAmount) + 1;
+    if (cells.length < minCols) continue;
+
     const paymentChannel = normalizeCell(cells[idxPaymentChannel] ?? "").toUpperCase();
     if (paymentChannel !== "QRPH") continue;
 
@@ -106,25 +117,16 @@ export function parseXenditCsv(
     const amount = parseAmount(cells[idxAmount] ?? "");
     if (amount <= 0) continue;
 
-    let paymentDateYmd = "";
-    if (idxPayment >= 0) paymentDateYmd = parseYmdFromCell(cells[idxPayment] ?? "");
-    if (!paymentDateYmd && idxCreatedIso >= 0) paymentDateYmd = parseYmdFromCell(cells[idxCreatedIso] ?? "");
-    if (!paymentDateYmd && idxCreated >= 0) paymentDateYmd = parseYmdFromCell(cells[idxCreated] ?? "");
-    if (!paymentDateYmd) continue;
-
-    if (paymentDateYmd < range.start || paymentDateYmd > range.end) continue;
-
-    const dedupe = `${invoiceNumber}|${paymentDateYmd}|${amount}`;
+    const dedupe = `${invoiceNumber}|${amount}`;
     if (seen.has(dedupe)) continue;
     seen.add(dedupe);
 
     out.push({
-      id: `xendit:${invoiceNumber}:${paymentDateYmd}:${shortHash(dedupe)}`,
+      id: `xendit:${invoiceNumber}:${shortHash(dedupe)}`,
       invoiceNumber,
       amount,
-      paymentDateYmd,
+      paymentDateYmd: "",
       reference,
-      currency: idxCurrency >= 0 ? normalizeCell(cells[idxCurrency] ?? "") : undefined,
     });
   }
 

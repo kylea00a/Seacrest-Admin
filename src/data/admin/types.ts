@@ -393,16 +393,16 @@ export interface JntImportIndexEntry {
   rowCount: number;
 }
 
-/** One QRPH payment row from Xendit balance history CSV (Payment Channel = QRPH, invoice in Reference). */
+/** One QRPH row from Xendit CSV columns E (channel), F (reference), H (amount). */
 export interface XenditImportRow {
   id: string;
-  /** Invoice from Reference column (e.g. INV-95912020552800001). */
+  /** Invoice from column F / Reference (e.g. INV-95912020552800001). */
   invoiceNumber: string;
+  /** Amount from column H. */
   amount: number;
-  /** Payment / settlement calendar day (YYYY-MM-DD). */
+  /** Legacy field; not read from CSV (E/F/H only). */
   paymentDateYmd: string;
   reference: string;
-  currency?: string;
 }
 
 export interface XenditImportFile {

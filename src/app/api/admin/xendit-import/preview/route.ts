@@ -47,7 +47,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-          "No QRPH rows found in this date range. Check Payment Channel, Reference, Amount, and Payment Date columns.",
+          "No QRPH rows found. CSV must include columns E (Payment Channel), F (Reference), and H (Amount) with E = QRPH.",
       },
       { status: 400 },
     );

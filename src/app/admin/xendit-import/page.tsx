@@ -84,9 +84,9 @@ function XenditPreviewTable({
         <table className="min-w-full text-xs">
           <thead className="bg-black/30 text-zinc-300">
             <tr>
-              <th className="px-3 py-2 text-left">Invoice (Reference)</th>
-              <th className="px-3 py-2 text-right">Amount</th>
-              <th className="px-3 py-2 text-left">Payment date</th>
+              <th className="px-3 py-2 text-left">Invoice (F)</th>
+              <th className="px-3 py-2 text-right">Amount (H)</th>
+              <th className="px-3 py-2 text-left">Channel (E)</th>
             </tr>
           </thead>
           <tbody>
@@ -94,7 +94,7 @@ function XenditPreviewTable({
               <tr key={r.id} className="border-t border-white/[0.06] text-zinc-200">
                 <td className="px-3 py-2 font-mono text-[11px]">{r.invoiceNumber || "—"}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{r.amount.toLocaleString()}</td>
-                <td className="px-3 py-2 font-mono text-[11px]">{r.paymentDateYmd || "—"}</td>
+                <td className="px-3 py-2 text-zinc-400">QRPH</td>
               </tr>
             ))}
           </tbody>
@@ -300,9 +300,9 @@ export default function XenditImportPage() {
         <div className="admin-card">
           <h1 className="admin-title">Xendit Transactions</h1>
           <p className="admin-muted mt-1">
-            Upload Xendit balance history CSV. Only rows with <strong className="font-normal text-zinc-300">Payment Channel = QRPH</strong>{" "}
-            are saved. Matching uses the <strong className="font-normal text-zinc-300">Reference</strong> invoice number on Sales
-            Report.
+            Upload Xendit balance history CSV. Only <strong className="font-normal text-zinc-300">columns E, F, and H</strong> are
+            used: <strong className="font-normal text-zinc-300">E = QRPH</strong>, F = invoice (Reference), H = Amount. Sales Report
+            matches F to order invoices.
           </p>
 
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
