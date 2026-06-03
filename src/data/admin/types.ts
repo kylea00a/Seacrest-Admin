@@ -393,6 +393,35 @@ export interface JntImportIndexEntry {
   rowCount: number;
 }
 
+/** One TRANSACTION row from Xendit balance history CSV (Line Type = TRANSACTION). */
+export interface XenditImportRow {
+  id: string;
+  /** Invoice from Reference column (e.g. INV-95912020552800001). */
+  invoiceNumber: string;
+  amount: number;
+  /** Payment / settlement calendar day (YYYY-MM-DD). */
+  paymentDateYmd: string;
+  reference: string;
+  currency?: string;
+}
+
+export interface XenditImportFile {
+  importedAt: string;
+  filename: string;
+  startDate: string;
+  endDate: string;
+  rows: XenditImportRow[];
+}
+
+export interface XenditImportIndexEntry {
+  id: string;
+  importedAt: string;
+  filename: string;
+  rowCount: number;
+  startDate: string;
+  endDate: string;
+}
+
 export type BookingStatus =
   | "pending"
   | "in_transit"

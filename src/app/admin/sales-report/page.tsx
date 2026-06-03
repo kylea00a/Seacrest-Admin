@@ -27,6 +27,13 @@ async function safeReadJson<T>(res: Response): Promise<T> {
   }
 }
 
+function normalizeInvoiceForXendit(invoice: string): string {
+  const s = (invoice ?? "").trim();
+  const m = s.match(/INV-[\dA-Za-z-]+/i);
+  if (m) return m[0].toUpperCase();
+  return s.toUpperCase();
+}
+
 function monthToRange(yyyyMm: string): { start: string; end: string } | null {
   const m = yyyyMm.match(/^(\d{4})-(\d{2})$/);
   if (!m) return null;
@@ -56,6 +63,7 @@ export default function SalesReportPage() {
   const [depositingDay, setDepositingDay] = useState<string>("");
   const [drilldownDay, setDrilldownDay] = useState<string>("");
   const [depositDialog, setDepositDialog] = useState<{ salesDate: string; amount: number; accountId: string } | null>(null);
+  const [xenditByInvoice, setXenditByInvoice] = useState<Record<string, number>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -92,9 +100,10 @@ export default function SalesReportPage() {
       setLoading(true);
       setError(null);
       try {
-        const [res, otherRes] = await Promise.all([
+        const [res, otherRes, xenditRes] = await Promise.all([
           fetch(`/api/admin/orders/compiled?start=${range.start}&end=${range.end}`, { cache: "no-store" }),
           fetch(`/api/admin/sales-report/delivery-fee-others?start=${range.start}&end=${range.end}`, { cache: "no-store" }),
+          fetch("/api/admin/xendit-import?match=1", { cache: "no-store" }),
         ]);
         const json = await safeReadJson<{ rows?: Array<Record<string, unknown>>; claims?: Record<string, unknown>; error?: string }>(res);
         const otherJson = await safeReadJson<{
@@ -102,13 +111,16 @@ export default function SalesReportPage() {
           items?: Array<{ date: string; invoiceNumber: string; amount: number }>;
           error?: string;
         }>(otherRes);
+        const xenditJson = await safeReadJson<{ byInvoice?: Record<string, number>; error?: string }>(xenditRes);
         if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
         if (!otherRes.ok) throw new Error(otherJson.error ?? `Failed with status ${otherRes.status}`);
+        if (!xenditRes.ok) throw new Error(xenditJson.error ?? `Failed with status ${xenditRes.status}`);
         if (cancelled) return;
         setRows(json.rows ?? []);
         setClaims((json.claims ?? {}) as Record<string, any>);
         setDeliveryFeeOthersByDay((otherJson.byDay ?? {}) as Record<string, number>);
         setDeliveryFeeOthersItems((otherJson.items ?? []) as Array<{ date: string; invoiceNumber: string; amount: number }>);
+        setXenditByInvoice((xenditJson.byInvoice ?? {}) as Record<string, number>);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -164,6 +176,8 @@ export default function SalesReportPage() {
     deliveryFee: number;
     deliveryFeeOthers: number;
     repurchaseTotal: number;
+    /** Matched Xendit TRANSACTION amounts + delivery fee (Others) for this day. */
+    actualReceived: number;
   };
 
   const daily = useMemo(() => {
@@ -181,6 +195,7 @@ export default function SalesReportPage() {
         deliveryFee: 0,
         deliveryFeeOthers: 0,
         repurchaseTotal: 0,
+        actualReceived: 0,
       };
       out.set(d, base);
       return base;
@@ -267,9 +282,23 @@ export default function SalesReportPage() {
       }
     }
 
-    // Oldest → latest (top-down)
+    for (const d of out.keys()) {
+      const dr = out.get(d)!;
+      dr.actualReceived += deliveryFeeOthersByDay[d] ?? 0;
+      for (const row of rows) {
+        const status = String(row["status"] ?? "");
+        if (isOrderExcludedFromSuccessMetrics(status)) continue;
+        const day = String(row["date"] ?? "").slice(0, 10);
+        if (day !== d) continue;
+        const inv = normalizeInvoiceForXendit(String(row["invoiceNumber"] ?? ""));
+        if (!inv) continue;
+        const amt = xenditByInvoice[inv];
+        if (amt != null && amt > 0) dr.actualReceived += amt;
+      }
+    }
+
     return Array.from(out.values()).sort((a, b) => a.date.localeCompare(b.date));
-  }, [rows, settings, productPriceByName, affiliatePriceByPackagePrice, deliveryFeeOthersByDay, month]);
+  }, [rows, settings, productPriceByName, affiliatePriceByPackagePrice, deliveryFeeOthersByDay, month, xenditByInvoice]);
 
   const monthTotals = useMemo(() => {
     let pkg = 0;
@@ -306,12 +335,13 @@ export default function SalesReportPage() {
     const byInvoice = included
       .map((r) => {
         const inv = String(r["invoiceNumber"] ?? "").trim();
+        const invKey = normalizeInvoiceForXendit(inv);
         const pkg = num(r["packagePrice"]);
         const subs = num(r["subscriptionsCount"]) * 498;
-        const rep = 0; // repurchase already reflected in daily calc, but show via totalAmount fallback for readability
         const deliveryFee = num(r["deliveryFee"]);
         const merchantFee = num(r["merchantFee"]);
         const totalAmount = num(r["totalAmount"]);
+        const xenditMatched = Boolean(invKey && xenditByInvoice[invKey]);
         return {
           invoiceNumber: inv || "—",
           status: String(r["status"] ?? ""),
@@ -320,6 +350,7 @@ export default function SalesReportPage() {
           deliveryFee,
           merchantFee,
           totalAmount,
+          actual: xenditMatched ? ("Received" as const) : ("Missing" as const),
         };
       })
       .sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
@@ -331,13 +362,14 @@ export default function SalesReportPage() {
         invoiceNumber: String(c.invoiceNumber ?? ""),
         amount: Number(c.amount) || 0,
         note: "Delivery fee (Others)",
+        actual: "Received" as const,
       }))
       .sort((a, b) => (a.invoiceNumber || "").localeCompare(b.invoiceNumber || ""));
 
     const totals = daily.find((d) => d.date === drilldownDay) ?? null;
 
     return { byInvoice, charges, totals, excludedCount: excluded.length, includedCount: included.length };
-  }, [drilldownDay, rows, deliveryFeeOthersItems, daily]);
+  }, [drilldownDay, rows, deliveryFeeOthersItems, daily, xenditByInvoice]);
 
   const depositedBySalesDay = useMemo(() => {
     const map = new Map<string, CashTransaction>();
@@ -465,12 +497,13 @@ export default function SalesReportPage() {
                   <th className="px-3 py-2 text-right whitespace-nowrap">Delivery fee</th>
                   <th className="px-3 py-2 text-right whitespace-nowrap">Delivery fee (Others)</th>
                   <th className="px-3 py-2 text-right whitespace-nowrap">Total</th>
+                  <th className="px-3 py-2 text-right whitespace-nowrap">Actual</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10">
                 {daily.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-4 text-zinc-500" colSpan={7}>
+                    <td className="px-3 py-4 text-zinc-500" colSpan={8}>
                       No successful orders found for this month.
                     </td>
                   </tr>
@@ -495,11 +528,17 @@ export default function SalesReportPage() {
                       <td className="px-3 py-2 text-right tabular-nums font-semibold">
                         {currency(d.packageAmount + d.subscriptionAmount + d.repurchaseTotal + d.deliveryFee + d.deliveryFeeOthers)}
                       </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-emerald-200">
+                        {currency(d.actualReceived)}
+                      </td>
                     </tr>
                   ))
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="mt-2 text-xs text-zinc-500">
+            Actual = matched Xendit TRANSACTION rows (by invoice) + delivery fee (Others) for that day.
           </div>
         </div>
 
@@ -567,12 +606,13 @@ export default function SalesReportPage() {
                           <th className="px-3 py-2 text-right whitespace-nowrap">Package</th>
                           <th className="px-3 py-2 text-right whitespace-nowrap">Subs</th>
                           <th className="px-3 py-2 text-right whitespace-nowrap">Delivery fee</th>
+                          <th className="px-3 py-2 text-right whitespace-nowrap">Actual</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/10">
                         {drilldown.byInvoice.length === 0 ? (
                           <tr>
-                            <td className="px-3 py-3 text-zinc-500" colSpan={5}>
+                            <td className="px-3 py-3 text-zinc-500" colSpan={6}>
                               No included orders.
                             </td>
                           </tr>
@@ -584,6 +624,17 @@ export default function SalesReportPage() {
                               <td className="px-3 py-2 text-right tabular-nums">{currency(r.packagePrice)}</td>
                               <td className="px-3 py-2 text-right tabular-nums">{currency(r.subscriptionAmount)}</td>
                               <td className="px-3 py-2 text-right tabular-nums">{currency(r.deliveryFee)}</td>
+                              <td className="px-3 py-2 text-right">
+                                <span
+                                  className={
+                                    r.actual === "Received"
+                                      ? "font-semibold text-emerald-300"
+                                      : "font-semibold text-amber-300"
+                                  }
+                                >
+                                  {r.actual}
+                                </span>
+                              </td>
                             </tr>
                           ))
                         )}
@@ -601,12 +652,13 @@ export default function SalesReportPage() {
                           <th className="px-3 py-2 text-left">Invoice</th>
                           <th className="px-3 py-2 text-left">Note</th>
                           <th className="px-3 py-2 text-right">Amount</th>
+                          <th className="px-3 py-2 text-right">Actual</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/10">
                         {drilldown.charges.length === 0 ? (
                           <tr>
-                            <td className="px-3 py-3 text-zinc-500" colSpan={3}>
+                            <td className="px-3 py-3 text-zinc-500" colSpan={4}>
                               No delivery fee (Others) charges for this day.
                             </td>
                           </tr>
@@ -616,6 +668,7 @@ export default function SalesReportPage() {
                               <td className="px-3 py-2 font-mono text-[11px]">{c.invoiceNumber || "—"}</td>
                               <td className="px-3 py-2 text-zinc-300">{c.note || "—"}</td>
                               <td className="px-3 py-2 text-right tabular-nums">{currency(c.amount)}</td>
+                              <td className="px-3 py-2 text-right font-semibold text-emerald-300">{c.actual}</td>
                             </tr>
                           ))
                         )}

@@ -70,6 +70,7 @@ export function adminPathToPermissionKey(pathname: string): AdminPermissionKey |
     "inventory-flow": "inventory",
     delivery: "delivery",
     "jnt-import": "delivery",
+    "xendit-import": "salesReport",
     settings: "settings",
     "packages-products": "packagesProducts",
     "telegram-notifications": "settings",
