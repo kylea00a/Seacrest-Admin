@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AdminSettings } from "@/data/admin/types";
 import { isOrderExcludedFromSuccessMetrics, type ProductBreakdown } from "@/data/admin/ordersParse";
+import { isWalletPaymentMethod } from "@/data/admin/orderPaymentMethod";
 import type { BankAccount, CashTransaction } from "@/data/admin/types";
 
 function countFmt(n: number) {
@@ -290,6 +291,11 @@ export default function SalesReportPage() {
         if (isOrderExcludedFromSuccessMetrics(status)) continue;
         const day = String(row["date"] ?? "").slice(0, 10);
         if (day !== d) continue;
+        const paymentMethod = String(row["paymentMethod"] ?? "");
+        if (isWalletPaymentMethod(paymentMethod)) {
+          dr.actualReceived += num(row["totalAmount"]);
+          continue;
+        }
         const inv = normalizeInvoiceForXendit(String(row["invoiceNumber"] ?? ""));
         if (!inv) continue;
         const amt = xenditByInvoice[inv];
@@ -341,7 +347,9 @@ export default function SalesReportPage() {
         const deliveryFee = num(r["deliveryFee"]);
         const merchantFee = num(r["merchantFee"]);
         const totalAmount = num(r["totalAmount"]);
+        const walletPaid = isWalletPaymentMethod(String(r["paymentMethod"] ?? ""));
         const xenditMatched = Boolean(invKey && xenditByInvoice[invKey]);
+        const actualReceived = walletPaid || xenditMatched;
         return {
           invoiceNumber: inv || "—",
           status: String(r["status"] ?? ""),
@@ -350,7 +358,7 @@ export default function SalesReportPage() {
           deliveryFee,
           merchantFee,
           totalAmount,
-          actual: xenditMatched ? ("Received" as const) : ("Missing" as const),
+          actual: actualReceived ? ("Received" as const) : ("Missing" as const),
         };
       })
       .sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
@@ -538,7 +546,7 @@ export default function SalesReportPage() {
             </table>
           </div>
           <div className="mt-2 text-xs text-zinc-500">
-            Actual = matched Xendit QRPH rows (by invoice) + delivery fee (Others) for that day.
+            Actual = wallet-paid orders (total amount) + matched Xendit QRPH (by invoice) + delivery fee (Others).
           </div>
         </div>
 
