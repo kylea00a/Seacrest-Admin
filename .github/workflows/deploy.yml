@@ -15,10 +15,11 @@ jobs:
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           script: |
+            set -e
             cd /var/www/Seacrest-Admin
             git pull origin main
             npm ci
             npm run build
-            pm2 delete seacrest-admin 2>/dev/null || true
-            pm2 start ecosystem.config.cjs
+            pm2 reload ecosystem.config.cjs --update-env 2>/dev/null || pm2 start ecosystem.config.cjs
             pm2 save
+            curl -sf http://127.0.0.1:3000/admin/login >/dev/null
