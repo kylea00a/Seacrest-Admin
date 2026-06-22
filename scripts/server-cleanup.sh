@@ -9,7 +9,7 @@ if crontab -l 2>/dev/null | grep -q perfcc; then
 else
   echo "No perfcc in crontab."
 fi
-rm -f /root/.config/cron/perfcc
+rm -f /root/.config/cron/perfcc /root/.config/cron/perfclean /etc/cron.d/perfclean
 if [ -f /root/.profile ] && grep -q perfcc /root/.profile; then
   sed -i '/perfcc/d' /root/.profile
   echo "Removed perfcc from /root/.profile."
