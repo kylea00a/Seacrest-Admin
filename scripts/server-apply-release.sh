@@ -15,8 +15,4 @@ echo "Extracting $RELEASE (code only; data/admin untouched)…"
 tar xzf "$RELEASE"
 rm -f "$RELEASE"
 
-pm2 reload ecosystem.config.cjs --update-env 2>/dev/null || pm2 start ecosystem.config.cjs
-pm2 save
-
-curl -sf http://127.0.0.1:3000/admin/login >/dev/null
-echo "Release applied; admin login OK."
+bash scripts/server-start.sh
