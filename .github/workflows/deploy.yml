@@ -5,10 +5,46 @@ on:
     branches: [ main ]
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy via SSH
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install and build (CI — not on 2GB droplet)
+        run: |
+          npm ci
+          npm run build
+          npm prune --omit=dev
+
+      - name: Pack release
+        run: |
+          tar czf release.tar.gz \
+            .next \
+            node_modules \
+            package.json \
+            package-lock.json \
+            ecosystem.config.cjs \
+            next.config.ts \
+            public \
+            scripts/server-apply-release.sh
+
+      - name: Upload release to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          source: release.tar.gz
+          target: /var/www/Seacrest-Admin
+
+      - name: Apply release on server
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HOST }}
@@ -16,5 +52,8 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           script: |
             cd /var/www/Seacrest-Admin
-            git pull origin main
-            bash scripts/server-deploy.sh
+            tar xzf release.tar.gz
+            rm -f release.tar.gz
+            pm2 reload ecosystem.config.cjs --update-env 2>/dev/null || pm2 start ecosystem.config.cjs
+            pm2 save
+            curl -sf http://127.0.0.1:3000/admin/login >/dev/null

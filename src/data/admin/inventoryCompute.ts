@@ -1,4 +1,5 @@
 import { mergeOrderRowWithAdjustment } from "@/data/admin/orderAdjustmentMerge";
+import { lookupInvoicesParsedRows } from "@/data/admin/orderInvoiceLookup";
 import { readOrdersDayAsync } from "@/data/admin/orders";
 import {
   calendarYmdInTimeZone,
@@ -50,76 +51,19 @@ function collectCrossDayClaimInvoices(
   return invoicesToLookup;
 }
 
-function matchInvoicesInDayFile(
-  sourceDate: string,
-  dayUnknown: unknown,
-  want: Set<string>,
-  out: Record<string, { sourceDate: string; rec: Record<string, unknown> }>,
-): void {
-  const day = typeof dayUnknown === "object" && dayUnknown !== null ? (dayUnknown as Record<string, unknown>) : null;
-  const parsed = day && typeof day["parsed"] === "object" && day["parsed"] !== null ? (day["parsed"] as Record<string, unknown>) : null;
-  const parsedRows = parsed?.["rows"];
-  if (!Array.isArray(parsedRows)) return;
-
-  for (const r of parsedRows) {
-    if (want.size === 0) break;
-    if (typeof r !== "object" || r === null) continue;
-    const rec = r as Record<string, unknown>;
-    const invoiceNumber = typeof rec["invoiceNumber"] === "string" ? (rec["invoiceNumber"] as string).trim() : "";
-    if (!invoiceNumber || !want.has(invoiceNumber)) continue;
-    out[invoiceNumber] = { sourceDate, rec };
-    want.delete(invoiceNumber);
-  }
-}
-
-/** Resolve invoice → order row (uses effectiveDate hint, then index scan). */
+/** Resolve invoice → order row (search index first, then fallback scan). */
 export async function lookupOrderRecordsByInvoices(
   invoiceNumbers: string[],
 ): Promise<Record<string, { sourceDate: string; rec: Record<string, unknown> }>> {
-  const adjustments = loadOrderAdjustments();
-  const index = loadOrdersIndex();
-  const allIndexDates = [...new Set(index.map((i) => i.date))];
-  return bulkLookupInvoicesParsedRows(invoiceNumbers, adjustments, allIndexDates);
+  return lookupInvoicesParsedRows(invoiceNumbers);
 }
 
 async function bulkLookupInvoicesParsedRows(
   invoiceNumbers: string[],
-  adjustments: OrderAdjustmentsMap,
-  indexDates: string[],
+  _adjustments: OrderAdjustmentsMap,
+  _indexDates: string[],
 ): Promise<Record<string, { sourceDate: string; rec: Record<string, unknown> }>> {
-  const want = new Set(invoiceNumbers.map((x) => x.trim()).filter(Boolean));
-  const out: Record<string, { sourceDate: string; rec: Record<string, unknown> }> = {};
-  if (want.size === 0) return out;
-
-  const bySourceDate = new Map<string, string[]>();
-  for (const inv of want) {
-    const eff = adjustments[inv]?.effectiveDate?.trim();
-    if (eff && /^\d{4}-\d{2}-\d{2}$/.test(eff)) {
-      const list = bySourceDate.get(eff) ?? [];
-      list.push(inv);
-      bySourceDate.set(eff, list);
-    }
-  }
-
-  await Promise.all(
-    [...bySourceDate.entries()].map(async ([sourceDate, invs]) => {
-      const dayUnknown = await readOrdersDayAsync(sourceDate);
-      const localWant = new Set(invs.filter((inv) => want.has(inv)));
-      matchInvoicesInDayFile(sourceDate, dayUnknown, localWant, out);
-      for (const inv of invs) want.delete(inv);
-    }),
-  );
-
-  if (want.size === 0) return out;
-
-  const dates = [...indexDates].sort((a, b) => b.localeCompare(a));
-  for (const sourceDate of dates) {
-    if (want.size === 0) break;
-    const dayUnknown = await readOrdersDayAsync(sourceDate);
-    matchInvoicesInDayFile(sourceDate, dayUnknown, want, out);
-  }
-
-  return out;
+  return lookupInvoicesParsedRows(invoiceNumbers);
 }
 
 export type InventoryOutTotals = Record<string, number>;
