@@ -34,7 +34,10 @@ jobs:
             next.config.ts \
             public \
             scripts/server-apply-release.sh \
-            scripts/server-start.sh
+            scripts/server-start.sh \
+            scripts/server-watchdog.sh \
+            scripts/server-cleanup.sh \
+            scripts/server-install-watchdog.sh
 
       - name: Upload release to server
         uses: appleboy/scp-action@v0.1.7
