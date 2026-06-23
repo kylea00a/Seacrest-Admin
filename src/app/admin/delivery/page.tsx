@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { format, startOfDay } from "date-fns";
 import type { AdminSettings, JntImportFile } from "@/data/admin/types";
 import {
   courierBucket,
@@ -12,8 +13,9 @@ import {
   type MergedDeliveryGroup,
 } from "@/data/admin/deliveryGrouping";
 import { findWaybillForReceiverDateRange } from "@/data/admin/jntImportMatch";
+import { DEFAULT_PRODUCT_KEYS, productNamesFromSettings } from "@/data/admin/productSettings";
 import { productColumnLabel } from "@/lib/productTableLabels";
-import { useAdminProductKeys } from "../_components/useAdminProductKeys";
+import InventoryDayPicker from "../_components/InventoryDayPicker";
 import type { DeliveryTrackingMap } from "@/data/admin/storage";
 
 type CompiledRow = {
@@ -35,14 +37,6 @@ type CompiledRow = {
   subscriptionProducts: Record<string, number>;
   repurchaseProducts: Record<string, number>;
 };
-
-function todayISO() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
 
 async function safeReadJson<T>(res: Response): Promise<T> {
   const text = await res.text();
@@ -87,17 +81,23 @@ function trackingDisplayForGroup(
 }
 
 export default function DeliveryPage() {
-  const productKeys = useAdminProductKeys();
+  const [pickDay, setPickDay] = useState<Date | undefined>(() => startOfDay(new Date()));
+  const selectedDate = useMemo(() => (pickDay ? format(pickDay, "yyyy-MM-dd") : ""), [pickDay]);
+  const dayLabel = useMemo(() => (pickDay ? format(pickDay, "dd/MM/yyyy") : "…"), [pickDay]);
+
   const [settings, setSettings] = useState<AdminSettings | null>(null);
-  const [startDate, setStartDate] = useState(todayISO());
-  const [endDate, setEndDate] = useState(todayISO());
-  const [groups, setGroups] = useState<MergedDeliveryGroup[]>([]);
+  const [rawRows, setRawRows] = useState<CompiledRow[]>([]);
   const [tracking, setTracking] = useState<DeliveryTrackingMap>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [courierFilter, setCourierFilter] = useState<"all" | "jt" | "intl" | "none">("all");
   const [jntExportEnabled, setJntExportEnabled] = useState(false);
   const [jntImport, setJntImport] = useState<JntImportFile | null>(null);
+
+  const productKeys = useMemo(
+    () => (settings ? productNamesFromSettings(settings.products) : DEFAULT_PRODUCT_KEYS),
+    [settings],
+  );
 
   const weightByProduct = useMemo(() => {
     const m: Record<string, number> = {};
@@ -107,17 +107,17 @@ export default function DeliveryPage() {
     return m;
   }, [settings]);
 
-  const loadSettings = async () => {
-    const res = await fetch("/api/admin/settings", { cache: "no-store" });
-    const json = await safeReadJson<{ settings?: AdminSettings; error?: string }>(res);
-    if (json.settings) setSettings(json.settings);
-  };
-
-  const loadTracking = async () => {
-    const res = await fetch("/api/admin/delivery/tracking", { cache: "no-store" });
-    const json = await safeReadJson<{ tracking?: DeliveryTrackingMap; error?: string }>(res);
-    setTracking(json.tracking ?? {});
-  };
+  const groups = useMemo(() => {
+    const paid = rawRows.filter((r) => isPaidDeliveryOrder(r as DeliveryRowLike));
+    const filtered = paid.filter((r) => {
+      if (courierFilter === "all") return true;
+      const b = courierBucket(r.deliveryCourier ?? "");
+      if (courierFilter === "jt") return b === "jt";
+      if (courierFilter === "intl") return b === "intl";
+      return b === "none";
+    });
+    return mergeDeliveryRowsByReceiver(filtered as DeliveryRowLike[], productKeys);
+  }, [rawRows, courierFilter, productKeys]);
 
   const loadJntImport = useCallback(async () => {
     const res = await fetch("/api/admin/jnt-import", { cache: "no-store" });
@@ -134,7 +134,15 @@ export default function DeliveryPage() {
     async function run() {
       setError(null);
       try {
-        await Promise.all([loadSettings(), loadTracking()]);
+        const [settingsRes, trackingRes] = await Promise.all([
+          fetch("/api/admin/settings", { cache: "no-store" }),
+          fetch("/api/admin/delivery/tracking", { cache: "no-store" }),
+        ]);
+        const settingsJson = await safeReadJson<{ settings?: AdminSettings; error?: string }>(settingsRes);
+        const trackingJson = await safeReadJson<{ tracking?: DeliveryTrackingMap; error?: string }>(trackingRes);
+        if (cancelled) return;
+        if (settingsJson.settings) setSettings(settingsJson.settings);
+        setTracking(trackingJson.tracking ?? {});
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
@@ -146,42 +154,41 @@ export default function DeliveryPage() {
   }, []);
 
   useEffect(() => {
+    if (!selectedDate) {
+      setRawRows([]);
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/admin/delivery/compiled?start=${selectedDate}&end=${selectedDate}`,
+          { cache: "no-store" },
+        );
+        const json = await safeReadJson<{ rows?: CompiledRow[]; error?: string }>(res);
+        if (cancelled) return;
+        setRawRows(json.rows ?? []);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDate]);
+
+  useEffect(() => {
     if (courierFilter !== "jt" && !jntExportEnabled) return;
     void loadJntImport();
   }, [courierFilter, jntExportEnabled, loadJntImport]);
-
-  const refetchRows = useCallback(async () => {
-    if (!startDate || !endDate) {
-      setGroups([]);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const start = startDate <= endDate ? startDate : endDate;
-      const end = startDate <= endDate ? endDate : startDate;
-      const res = await fetch(`/api/admin/delivery/compiled?start=${start}&end=${end}`, { cache: "no-store" });
-      const json = await safeReadJson<{ rows?: CompiledRow[]; error?: string }>(res);
-      const raw = (json.rows ?? []).filter((r) => isPaidDeliveryOrder(r as DeliveryRowLike));
-      const filtered = raw.filter((r) => {
-        if (courierFilter === "all") return true;
-        const b = courierBucket(r.deliveryCourier ?? "");
-        if (courierFilter === "jt") return b === "jt";
-        if (courierFilter === "intl") return b === "intl";
-        return b === "none";
-      });
-      const merged = mergeDeliveryRowsByReceiver(filtered as DeliveryRowLike[], productKeys);
-      setGroups(merged);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [startDate, endDate, productKeys, courierFilter]);
-
-  useEffect(() => {
-    void refetchRows();
-  }, [refetchRows]);
 
   useEffect(() => {
     if (courierFilter !== "jt") setJntExportEnabled(false);
@@ -189,16 +196,14 @@ export default function DeliveryPage() {
 
   const importWaybillByKey = useMemo(() => {
     const rows = jntImport?.rows ?? [];
-    const start = startDate <= endDate ? startDate : endDate;
-    const end = startDate <= endDate ? endDate : startDate;
     const map: Record<string, string> = {};
-    if (courierFilter !== "jt") return map;
+    if (courierFilter !== "jt" || !selectedDate) return map;
     for (const g of groups) {
-      const w = findWaybillForReceiverDateRange(g.shippingFullName, start, end, rows);
+      const w = findWaybillForReceiverDateRange(g.shippingFullName, selectedDate, selectedDate, rows);
       if (w) map[g.key] = w;
     }
     return map;
-  }, [groups, jntImport, startDate, endDate, courierFilter]);
+  }, [groups, jntImport, selectedDate, courierFilter]);
 
   const productColumnTotals = useMemo(
     () =>
@@ -206,8 +211,10 @@ export default function DeliveryPage() {
     [groups, productKeys],
   );
 
+  const setToday = () => setPickDay(startOfDay(new Date()));
+
   const exportJntExcel = async () => {
-    if (courierFilter !== "jt" || !jntExportEnabled || !settings) return;
+    if (courierFilter !== "jt" || !jntExportEnabled || !settings || !selectedDate) return;
     try {
       if (!jntImport?.rows?.length) await loadJntImport();
       const { buildJntExpressWorkbookBuffer } = await import("@/lib/jntExpressExport");
@@ -227,7 +234,7 @@ export default function DeliveryPage() {
       });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `jnt-express-${startDate}-to-${endDate}.xlsx`;
+      a.download = `jnt-express-${selectedDate}.xlsx`;
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (e) {
@@ -236,19 +243,17 @@ export default function DeliveryPage() {
   };
 
   const exportPackingPdf = async () => {
-    if (courierFilter !== "jt" || !groups.length || !settings || productKeys.length === 0) return;
+    if (courierFilter !== "jt" || !groups.length || !settings || productKeys.length === 0 || !selectedDate) return;
     try {
       const { buildPackingExportPdfBlob } = await import("@/lib/packingExportPdf");
-      const start = startDate <= endDate ? startDate : endDate;
-      const end = startDate <= endDate ? endDate : startDate;
       const trackingByGroupKey: Record<string, string> = {};
       for (const g of groups) {
         const v = trackingDisplayForGroup(g, importWaybillByKey[g.key], tracking);
         if (v) trackingByGroupKey[g.key] = v;
       }
       const blob = buildPackingExportPdfBlob({
-        startDateYmd: start,
-        endDateYmd: end,
+        startDateYmd: selectedDate,
+        endDateYmd: selectedDate,
         courierLabel: "J&T",
         productKeys,
         groups,
@@ -257,7 +262,7 @@ export default function DeliveryPage() {
       });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `packing-jt-${start}-to-${end}.pdf`;
+      a.download = `packing-jt-${selectedDate}.pdf`;
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (e) {
@@ -271,11 +276,11 @@ export default function DeliveryPage() {
         <div>
           <h1 className="admin-title">Delivery</h1>
           <p className="admin-muted max-w-2xl">
-            Paid <span className="text-zinc-300">For Delivery</span> orders only. The date range matches each
-            order&apos;s <span className="text-zinc-300">claim calendar day</span> (same as All Orders → Claim date), not
-            only the import sheet day — so an order imported earlier but claimed on the selected day appears here. Rows
-            with the same receiver, contact #, and shipping address are combined. Set courier in All Orders → Edit
-            (blank, J&amp;T, International). Pick-up + paid + address auto-claims for inventory.
+            Paid <span className="text-zinc-300">For Delivery</span> orders only. Pick one{" "}
+            <span className="text-zinc-300">claim calendar day</span> (same as All Orders → Claim date) — an order
+            imported earlier but claimed on that day appears here. Rows with the same receiver, contact #, and shipping
+            address are combined. Set courier in All Orders → Edit (blank, J&amp;T, International). Pick-up + paid +
+            address auto-claims for inventory.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -324,24 +329,17 @@ export default function DeliveryPage() {
             </div>
           ) : null}
           <div>
-            <div className="text-xs font-semibold text-zinc-400">Start date</div>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="admin-input mt-1 w-full sm:w-auto"
-            />
+            <div className="text-xs font-semibold text-zinc-400">Date</div>
+            <div className="mt-1">
+              <InventoryDayPicker value={pickDay} onChange={setPickDay} />
+            </div>
           </div>
-          <div>
-            <div className="text-xs font-semibold text-zinc-400">End date</div>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="admin-input mt-1 w-full sm:w-auto"
-            />
-          </div>
+          <button type="button" onClick={setToday} className="admin-btn-secondary px-3 py-2 text-xs">
+            Today
+          </button>
           <div className="text-xs text-zinc-400">
+            Showing: <span className="font-semibold text-zinc-200">{dayLabel}</span>
+            {" · "}
             Groups: <span className="font-semibold text-zinc-200">{groups.length}</span>
           </div>
         </div>
