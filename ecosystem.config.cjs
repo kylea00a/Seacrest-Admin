@@ -33,7 +33,7 @@ module.exports = {
       exec_mode: "fork",
       env: {
         NODE_ENV: "production",
-        NODE_OPTIONS: "--max-old-space-size=1024",
+        NODE_OPTIONS: "--max-old-space-size=1536",
         PORT: process.env.PORT || "3000",
         TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || "",
         TELEGRAM_CHAT_IDS: process.env.TELEGRAM_CHAT_IDS || "",

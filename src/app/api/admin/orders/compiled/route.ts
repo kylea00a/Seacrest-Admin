@@ -73,16 +73,11 @@ export async function GET(req: Request) {
 
   const claimsForScheduleFilter = scheduleByClaim ? loadOrderClaims() : null;
 
-  const dayPayloads = await Promise.all(
-    datesToRead.map(async (sourceDate) => {
-      const dayUnknown = await readOrdersDayAsync(sourceDate);
-      return { sourceDate, dayUnknown };
-    })
-  );
-
   const rows: Array<Record<string, unknown>> = [];
 
-  for (const { sourceDate, dayUnknown } of dayPayloads) {
+  /** Read one day at a time — parallel reads OOM on 2GB server (many × 18MB JSON files). */
+  for (const sourceDate of datesToRead) {
+    const dayUnknown = await readOrdersDayAsync(sourceDate);
     const day =
       typeof dayUnknown === "object" && dayUnknown !== null
         ? (dayUnknown as Record<string, unknown>)
