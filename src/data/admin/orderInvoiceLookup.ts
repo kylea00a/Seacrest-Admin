@@ -139,44 +139,40 @@ export async function lookupInvoicesParsedRows(
     }
   }
 
-  await Promise.all(
-    [...byAdjustmentDate.entries()].map(async ([sourceDate, invs]) => {
-      const dayUnknown = await readOrdersDayAsync(sourceDate);
-      const rows = parseDayRows(dayUnknown);
-      const localWant = new Set(invs.filter((inv) => want.has(inv)));
-      for (const rec of rows) {
-        if (localWant.size === 0) break;
-        const invoiceNumber =
-          typeof rec["invoiceNumber"] === "string" ? rec["invoiceNumber"].trim() : "";
-        if (!invoiceNumber || !localWant.has(invoiceNumber)) continue;
-        out[invoiceNumber] = { sourceDate, rec };
-        want.delete(invoiceNumber);
-        localWant.delete(invoiceNumber);
-      }
-    }),
-  );
+  for (const [sourceDate, invs] of byAdjustmentDate.entries()) {
+    const dayUnknown = await readOrdersDayAsync(sourceDate);
+    const rows = parseDayRows(dayUnknown);
+    const localWant = new Set(invs.filter((inv) => want.has(inv)));
+    for (const rec of rows) {
+      if (localWant.size === 0) break;
+      const invoiceNumber =
+        typeof rec["invoiceNumber"] === "string" ? rec["invoiceNumber"].trim() : "";
+      if (!invoiceNumber || !localWant.has(invoiceNumber)) continue;
+      out[invoiceNumber] = { sourceDate, rec };
+      want.delete(invoiceNumber);
+      localWant.delete(invoiceNumber);
+    }
+  }
 
   if (want.size === 0) return out;
 
-  const { bySourceDate, unknown } = groupInvoicesBySourceDate([...want]);
-  await Promise.all(
-    [...bySourceDate.entries()].map(async ([sourceDate, invs]) => {
-      const dayUnknown = await readOrdersDayAsync(sourceDate);
-      const rows = parseDayRows(dayUnknown);
-      const localWant = new Set(invs);
-      for (const rec of rows) {
-        if (localWant.size === 0) break;
-        const invoiceNumber =
-          typeof rec["invoiceNumber"] === "string" ? rec["invoiceNumber"].trim() : "";
-        if (!invoiceNumber || !localWant.has(invoiceNumber)) continue;
-        out[invoiceNumber] = { sourceDate, rec };
-        want.delete(invoiceNumber);
-        localWant.delete(invoiceNumber);
-      }
-    }),
-  );
+  const { bySourceDate } = groupInvoicesBySourceDate([...want]);
+  for (const [sourceDate, invs] of bySourceDate.entries()) {
+    const dayUnknown = await readOrdersDayAsync(sourceDate);
+    const rows = parseDayRows(dayUnknown);
+    const localWant = new Set(invs);
+    for (const rec of rows) {
+      if (localWant.size === 0) break;
+      const invoiceNumber =
+        typeof rec["invoiceNumber"] === "string" ? rec["invoiceNumber"].trim() : "";
+      if (!invoiceNumber || !localWant.has(invoiceNumber)) continue;
+      out[invoiceNumber] = { sourceDate, rec };
+      want.delete(invoiceNumber);
+      localWant.delete(invoiceNumber);
+    }
+  }
 
-  if (unknown.length === 0 && want.size === 0) return out;
+  if (want.size === 0) return out;
 
   const index = loadOrdersIndex();
   const dates = [...new Set(index.map((i) => i.date))].sort((a, b) => b.localeCompare(a));

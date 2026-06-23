@@ -44,6 +44,35 @@ function todayISO() {
   return `${y}-${m}-${day}`;
 }
 
+async function safeReadJson<T>(res: Response): Promise<T> {
+  const text = await res.text();
+  if (!res.ok) {
+    if (text.trimStart().startsWith("<")) {
+      throw new Error(
+        res.status === 502
+          ? "Server unavailable (502). The app may have restarted — wait a moment and refresh."
+          : `Server error (${res.status}). Try refreshing the page.`,
+      );
+    }
+    try {
+      const j = JSON.parse(text) as { error?: string };
+      throw new Error(j.error ?? `Failed with status ${res.status}`);
+    } catch (e) {
+      if (e instanceof Error && e.message !== "Failed with status " + res.status) throw e;
+      throw new Error(`Failed with status ${res.status}`);
+    }
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(
+      res.status === 502
+        ? "Server unavailable (502). Wait a moment and refresh."
+        : `Bad response (${res.status}). Expected JSON.`,
+    );
+  }
+}
+
 /** Resolve displayed tracking: J&amp;T import match first, then saved manual value (legacy). */
 function trackingDisplayForGroup(
   g: MergedDeliveryGroup,
@@ -80,22 +109,19 @@ export default function DeliveryPage() {
 
   const loadSettings = async () => {
     const res = await fetch("/api/admin/settings", { cache: "no-store" });
-    const json = (await res.json()) as { settings?: AdminSettings; error?: string };
-    if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
+    const json = await safeReadJson<{ settings?: AdminSettings; error?: string }>(res);
     if (json.settings) setSettings(json.settings);
   };
 
   const loadTracking = async () => {
     const res = await fetch("/api/admin/delivery/tracking", { cache: "no-store" });
-    const json = (await res.json()) as { tracking?: DeliveryTrackingMap; error?: string };
-    if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
+    const json = await safeReadJson<{ tracking?: DeliveryTrackingMap; error?: string }>(res);
     setTracking(json.tracking ?? {});
   };
 
   const loadJntImport = useCallback(async () => {
     const res = await fetch("/api/admin/jnt-import", { cache: "no-store" });
-    const json = (await res.json()) as JntImportFile & { imports?: unknown; error?: string };
-    if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
+    const json = await safeReadJson<JntImportFile & { imports?: unknown; error?: string }>(res);
     setJntImport({
       importedAt: json.importedAt,
       filename: json.filename,
@@ -135,8 +161,7 @@ export default function DeliveryPage() {
       const start = startDate <= endDate ? startDate : endDate;
       const end = startDate <= endDate ? endDate : startDate;
       const res = await fetch(`/api/admin/delivery/compiled?start=${start}&end=${end}`, { cache: "no-store" });
-      const json = (await res.json()) as { rows?: CompiledRow[]; error?: string };
-      if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
+      const json = await safeReadJson<{ rows?: CompiledRow[]; error?: string }>(res);
       const raw = (json.rows ?? []).filter((r) => isPaidDeliveryOrder(r as DeliveryRowLike));
       const filtered = raw.filter((r) => {
         if (courierFilter === "all") return true;
