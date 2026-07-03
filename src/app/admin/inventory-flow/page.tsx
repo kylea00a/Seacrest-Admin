@@ -103,6 +103,24 @@ export default function InventoryFlowPage() {
     return v;
   };
 
+  const exportExcel = async () => {
+    if (!productNames.length || !rows.length) return;
+    try {
+      const { buildInventoryFlowWorkbookBuffer } = await import("@/lib/inventoryFlowExport");
+      const buf = await buildInventoryFlowWorkbookBuffer(productNames, rows, range.label);
+      const blob = new Blob([buf], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `inventory-flow-${range.start}-to-${range.end}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   return (
     <div className="admin-card">
       <h1 className="admin-title">Inventory Flow</h1>
@@ -143,6 +161,14 @@ export default function InventoryFlowPage() {
           onClick={() => void load(true)}
         >
           {refreshing ? "Refreshing…" : "Refresh month"}
+        </button>
+        <button
+          type="button"
+          disabled={loading || !productNames.length || !rows.length}
+          className="admin-btn-secondary px-3 py-2 text-xs"
+          onClick={() => void exportExcel()}
+        >
+          Export Excel
         </button>
       </div>
 
