@@ -241,7 +241,7 @@ function OrderLineEditForm({
     <div className="space-y-4">
       {newEditMode ? (
         <p className="rounded-lg border border-red-500/40 bg-red-950/40 px-3 py-2 text-xs text-red-100">
-          <strong>New Edit</strong> — saving will override the usual claim and same-day locks (for users with
+          <strong>New Edit</strong> … saving will override the usual claim and same-day locks (for users with
           full order edit access).
         </p>
       ) : null}
@@ -350,7 +350,7 @@ function OrderLineEditForm({
               }
               className={inp}
             >
-              <option value="">—</option>
+              <option value="">…</option>
               <option value="J&T">J&amp;T</option>
               <option value="International">International</option>
             </select>
@@ -456,12 +456,13 @@ export default function OrdersPage() {
   /** "New Edit" column: bypasses claim / same-day locks when saving (ordersFullEdit). */
   const [lineEditNewOpen, setLineEditNewOpen] = useState<Record<string, boolean>>({});
   const [lineEditDrafts, setLineEditDrafts] = useState<Record<string, LineEditDraft>>({});
-  /** YYYY-MM-DD — editable in New Edit, sent on save with bypass header. */
+  /** YYYY-MM-DD … editable in New Edit, sent on save with bypass header. */
   const [claimDateDrafts, setClaimDateDrafts] = useState<Record<string, string>>({});
-  /** YYYY-MM-DD — editable in New Edit, saved as order effective date override. */
+  /** YYYY-MM-DD … editable in New Edit, saved as order effective date override. */
   const [effectiveDateDrafts, setEffectiveDateDrafts] = useState<Record<string, string>>({});
   const [savingLineEdit, setSavingLineEdit] = useState<string>("");
   const [resettingClaims, setResettingClaims] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const { startDate, endDate } = useMemo(() => {
     if (!pickRange?.from) return { startDate: "", endDate: "" };
@@ -628,7 +629,7 @@ export default function OrdersPage() {
     }
   };
 
-  /** Reset pagination when filters/range change — not when `rows` refetches (e.g. after saving a line edit). */
+  /** Reset pagination when filters/range change … not when `rows` refetches (e.g. after saving a line edit). */
   useEffect(() => {
     setTablePage(1);
   }, [search, statusFilter, deliveryMethodFilter, rowsPerPage, startDate, endDate, index.length]);
@@ -1128,6 +1129,40 @@ export default function OrdersPage() {
     return filteredRows.slice(start, start + rowsPerPage);
   }, [filteredRows, tablePage, rowsPerPage]);
 
+  const dateRangeLabel = useMemo(() => {
+    if (!startDate || !endDate) return "";
+    if (startDate === endDate) return format(new Date(`${startDate}T12:00:00`), "dd/MM/yyyy");
+    return `${format(new Date(`${startDate}T12:00:00`), "dd/MM/yyyy")} … ${format(new Date(`${endDate}T12:00:00`), "dd/MM/yyyy")}`;
+  }, [startDate, endDate]);
+
+  const exportExcel = async () => {
+    if (isSearchMode || !startDate || !endDate || !productKeys.length) return;
+    setExporting(true);
+    setError(null);
+    try {
+      const start = startDate <= endDate ? startDate : endDate;
+      const end = startDate <= endDate ? endDate : startDate;
+      const res = await fetch(`/api/admin/orders/compiled?start=${start}&end=${end}`, { cache: "no-store" });
+      const json = await safeReadJson<{ rows?: Array<ParsedRow & { date: string }>; error?: string }>(res);
+      if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
+      const exportRows = (json.rows ?? []) as Array<ParsedRow & { date: string }>;
+      const { buildOrdersWorkbookBuffer } = await import("@/lib/ordersExport");
+      const buf = await buildOrdersWorkbookBuffer(productKeys, exportRows, dateRangeLabel);
+      const blob = new Blob([buf], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `orders-${start}-to-${end}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const hasOpenSection = pkgProductsOpen || subProductsOpen || repProductsOpen;
   const headRowSpan = hasOpenSection ? 2 : 1;
   const shortKey = (k: string) => k.replace("Chips - ", "Chips ");
@@ -1210,12 +1245,25 @@ export default function OrdersPage() {
               <OrdersDateRangePicker value={pickRange} onChange={setPickRange} />
             </div>
           </div>
+          <button
+            type="button"
+            disabled={exporting || loading || isSearchMode || !startDate || !endDate || !productKeys.length}
+            className="admin-btn-secondary px-3 py-2 text-xs"
+            title={
+              isSearchMode
+                ? "Clear search to export by date range"
+                : "Export all orders in the date range (through Status column)"
+            }
+            onClick={() => void exportExcel()}
+          >
+            {exporting ? "Exporting…" : "Export Excel"}
+          </button>
           <div className="text-xs text-zinc-400">
             {isSearchMode && searchMatchCount != null ? (
               <>
                 Matches: <span className="font-semibold text-zinc-200">{searchMatchCount}</span>
                 {searchTruncated ? (
-                  <span className="ml-1 text-zinc-500">(showing first 100 — narrow your search)</span>
+                  <span className="ml-1 text-zinc-500">(showing first 100 … narrow your search)</span>
                 ) : null}
                 {hydratingSearch ? <span className="ml-2 text-zinc-500">(loading…)</span> : null}
               </>
@@ -1227,7 +1275,7 @@ export default function OrdersPage() {
                 {filteredRows.length !== rows.length ? (
                   <>
                     {" "}
-                    • Filtered: <span className="font-semibold text-zinc-200">{filteredRows.length}</span>
+                    … Filtered: <span className="font-semibold text-zinc-200">{filteredRows.length}</span>
                   </>
                 ) : null}
               </>
@@ -1241,7 +1289,7 @@ export default function OrdersPage() {
             className="rounded-xl bg-amber-400 px-3 py-2 text-xs font-semibold text-amber-950 hover:bg-amber-300 disabled:opacity-60"
             title="Superadmin tool: reset claim dates to 2026-04-10 for paid claimed orders, excluding the latest uploaded import day."
           >
-            {resettingClaims ? "Resetting…" : "Reset claim dates → Apr 10"}
+            {resettingClaims ? "Resetting…" : "Reset claim dates ? Apr 10"}
           </button>
         ) : null}
         </div>
@@ -1595,7 +1643,7 @@ export default function OrdersPage() {
                       onClick={() => setPkgProductsOpen(false)}
                       className="shrink-0 rounded px-1 text-zinc-400 hover:bg-white/10 hover:text-emerald-300"
                     >
-                      ▲
+                      ?
                     </button>
                   </div>
                 </th>
@@ -1610,7 +1658,7 @@ export default function OrdersPage() {
                       onClick={() => setPkgProductsOpen(true)}
                       className="shrink-0 rounded px-1 text-zinc-400 hover:bg-white/10 hover:text-emerald-300"
                     >
-                      ▼
+                      ?
                     </button>
                   </div>
                 </th>
@@ -1627,7 +1675,7 @@ export default function OrdersPage() {
                         onClick={() => setSubProductsOpen(false)}
                         className="shrink-0 rounded px-1 text-zinc-400 hover:bg-white/10 hover:text-emerald-300"
                       >
-                        ▲
+                        ?
                       </button>
                     </div>
                   </th>
@@ -1646,7 +1694,7 @@ export default function OrdersPage() {
                       onClick={() => setSubProductsOpen(true)}
                       className="shrink-0 rounded px-1 text-zinc-400 hover:bg-white/10 hover:text-emerald-300"
                     >
-                      ▼
+                      ?
                     </button>
                   </div>
                 </th>
@@ -1663,7 +1711,7 @@ export default function OrdersPage() {
                         onClick={() => setRepProductsOpen(false)}
                         className="shrink-0 rounded px-1 text-zinc-400 hover:bg-white/10 hover:text-emerald-300"
                       >
-                        ▲
+                        ?
                       </button>
                     </div>
                   </th>
@@ -1682,7 +1730,7 @@ export default function OrdersPage() {
                       onClick={() => setRepProductsOpen(true)}
                       className="shrink-0 rounded px-1 text-zinc-400 hover:bg-white/10 hover:text-emerald-300"
                     >
-                      ▼
+                      ?
                     </button>
                   </div>
                 </th>
@@ -1717,7 +1765,7 @@ export default function OrdersPage() {
                         onClick={() => setShippingDetailsOpen(false)}
                         className="shrink-0 rounded px-1 text-zinc-400 hover:bg-white/10 hover:text-emerald-300"
                       >
-                        ▲
+                        ?
                       </button>
                     </div>
                   </th>
@@ -1754,7 +1802,7 @@ export default function OrdersPage() {
                       onClick={() => setShippingDetailsOpen(true)}
                       className="shrink-0 rounded px-1 text-zinc-400 hover:bg-white/10 hover:text-emerald-300"
                     >
-                      ▼
+                      ?
                     </button>
                   </div>
                 </th>
@@ -1984,15 +2032,15 @@ export default function OrdersPage() {
                           );
                         }
                         if (claimMode === "unpaid") {
-                          return <span className="text-zinc-500">—</span>;
+                          return <span className="text-zinc-500">…</span>;
                         }
-                        return <span className="text-zinc-500">—</span>;
+                        return <span className="text-zinc-500">…</span>;
                       })()}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap text-zinc-300" title="Claim calendar day (Asia/Manila). Delivery is auto-claimed when you set status to Paid/Complete; pick-up uses the Claim button.">
                       {claimMode === "unpaid" || claimMode === "na"
-                        ? "—"
-                        : (getClaimCalendarYmd(inv, claims) ?? "—")}
+                        ? "…"
+                        : (getClaimCalendarYmd(inv, claims) ?? "…")}
                     </td>
                     <td className="px-3 py-2 text-center align-top">
                       {hideLineEditToggle ? (
@@ -2000,15 +2048,15 @@ export default function OrdersPage() {
                           className="text-zinc-600"
                           title={
                             !canFullOrderEdit
-                              ? "Ask a superadmin to enable “Edit Superadmin” for your account (Accounts) to change status, line items, delivery, and fees."
+                              ? "Ask a superadmin to enable …Edit Superadmin… for your account (Accounts) to change status, line items, delivery, and fees."
                               : isPickupDelivery(dm) && claimMode === "claimed"
                                 ? "Claimed pick-up orders cannot be line-edited."
                                 : isNonPickupDelivery(dm) && !sameOrderDay
-                                  ? "After the claim calendar day (PH time), delivery line edits are locked — use New Edit to override if permitted."
+                                  ? "After the claim calendar day (PH time), delivery line edits are locked … use New Edit to override if permitted."
                                   : undefined
                           }
                         >
-                          —
+                          …
                         </span>
                       ) : (
                         <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-zinc-400">
@@ -2022,7 +2070,7 @@ export default function OrdersPage() {
                                 : isNonPickupDelivery(dm)
                                   ? claimMode === "claimed"
                                     ? "Claimed delivery: line items stay editable until end of the claim calendar day (PH time)."
-                                    : "Edit line items — delivery can be changed only on the claim calendar day (PH time)."
+                                    : "Edit line items … delivery can be changed only on the claim calendar day (PH time)."
                                   : "Edit package / subscription / repurchase quantities and delivery"
                             }
                             onChange={(e) => {
@@ -2056,9 +2104,9 @@ export default function OrdersPage() {
                       {!canFullOrderEdit ? (
                         <span
                           className="text-zinc-600"
-                          title="Enable “Edit Superadmin” (full order edit) for your account under Accounts."
+                          title="Enable …Edit Superadmin… (full order edit) for your account under Accounts."
                         >
-                          —
+                          …
                         </span>
                       ) : (
                         <button
@@ -2071,7 +2119,7 @@ export default function OrdersPage() {
                                 : claimMode === "na"
                                   ? "This row cannot be edited."
                                   : "Cannot use New Edit for this row."
-                              : "Open full line editor — save bypasses claim and same-day locks for users with edit access."
+                              : "Open full line editor … save bypasses claim and same-day locks for users with edit access."
                           }
                           onClick={() => {
                             setLineEditNewOpen((prev) => ({ ...prev, [inv]: true }));
@@ -2233,7 +2281,7 @@ export default function OrdersPage() {
                 className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-white/10"
                 title="Click to remove from selection"
               >
-                {inv} <span className="text-zinc-500">×</span>
+                {inv} <span className="text-zinc-500">…</span>
               </button>
             ))}
           </div>
@@ -2247,7 +2295,7 @@ export default function OrdersPage() {
             {filteredRows.length === 0
               ? 0
               : (tablePage - 1) * rowsPerPage + 1}
-            –
+            …
             {Math.min(tablePage * rowsPerPage, filteredRows.length)}
           </span>{" "}
           of <span className="font-semibold text-zinc-200">{filteredRows.length}</span> (all loaded)
