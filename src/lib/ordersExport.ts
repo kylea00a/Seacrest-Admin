@@ -29,6 +29,7 @@ export type OrdersExportRow = {
   region: string;
   zipCode: string;
   status: string;
+  claimDate?: string;
 };
 
 function shortProductKey(k: string) {
@@ -81,6 +82,7 @@ export async function buildOrdersWorkbookBuffer(
     "Region",
     "Zip",
     "Status",
+    "Claim date",
   ];
 
   const headerRow1 = 3;
@@ -212,6 +214,7 @@ export async function buildOrdersWorkbookBuffer(
       r.region,
       r.zipCode,
       r.status,
+      r.claimDate ?? "",
     ];
     for (const val of tailValues) {
       const cell = ws.getCell(rowNum, c++);
