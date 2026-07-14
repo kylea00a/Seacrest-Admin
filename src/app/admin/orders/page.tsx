@@ -1157,11 +1157,13 @@ export default function OrdersPage() {
           invoiceNumber: r.invoiceNumber,
           claims: exportClaims,
         });
+        const productStatus =
+          claimMode === "claimed" ? "Claimed" : claimMode === "claim" ? "Claim" : "";
         const claimDate =
           claimMode === "unpaid" || claimMode === "na"
             ? ""
             : (getClaimCalendarYmd(r.invoiceNumber, exportClaims) ?? "");
-        return { ...r, claimDate };
+        return { ...r, productStatus, claimDate };
       });
       const { buildOrdersWorkbookBuffer } = await import("@/lib/ordersExport");
       const buf = await buildOrdersWorkbookBuffer(productKeys, exportRows, dateRangeLabel);

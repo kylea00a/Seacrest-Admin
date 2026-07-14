@@ -29,6 +29,7 @@ export type OrdersExportRow = {
   region: string;
   zipCode: string;
   status: string;
+  productStatus?: string;
   claimDate?: string;
 };
 
@@ -82,6 +83,7 @@ export async function buildOrdersWorkbookBuffer(
     "Region",
     "Zip",
     "Status",
+    "Product status",
     "Claim date",
   ];
 
@@ -214,6 +216,7 @@ export async function buildOrdersWorkbookBuffer(
       r.region,
       r.zipCode,
       r.status,
+      r.productStatus ?? "",
       r.claimDate ?? "",
     ];
     for (const val of tailValues) {
