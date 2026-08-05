@@ -2,6 +2,12 @@
 # Start or restart Seacrest Admin on port 3000 (setsid; skip hung pm2 on 2GB droplet).
 set -euo pipefail
 
+# Disk often remounts read-only after crash/OOM — services cannot start without RW.
+if ! touch /var/tmp/.seacrest-rw-check 2>/dev/null; then
+  mount -o remount,rw / 2>/dev/null || true
+fi
+rm -f /var/tmp/.seacrest-rw-check 2>/dev/null || true
+
 APP_DIR="${APP_DIR:-/var/www/Seacrest-Admin}"
 cd "$APP_DIR"
 PORT="${PORT:-3000}"
