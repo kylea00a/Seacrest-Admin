@@ -15,4 +15,12 @@ echo "Extracting $RELEASE (code only; data/admin untouched)…"
 tar xzf "$RELEASE"
 rm -f "$RELEASE"
 
-bash scripts/server-start.sh
+systemctl stop seacrest-admin-sync.timer seacrest-admin-sync.service 2>/dev/null || true
+systemctl disable seacrest-admin-sync.timer seacrest-admin-sync.service 2>/dev/null || true
+systemctl mask seacrest-admin-sync.timer seacrest-admin-sync.service 2>/dev/null || true
+
+if [[ -f scripts/server-install-systemd.sh ]]; then
+  bash scripts/server-install-systemd.sh
+else
+  bash scripts/server-start.sh
+fi

@@ -1,0 +1,23 @@
+[Unit]
+Description=Seacrest Admin (Next.js)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/Seacrest-Admin
+Environment=NODE_OPTIONS=--max-old-space-size=1536
+Environment=PORT=3000
+# Remount root RW if crash left filesystem read-only
+ExecStartPre=/bin/bash -c 'touch /var/tmp/.seacrest-rw 2>/dev/null || mount -o remount,rw /; rm -f /var/tmp/.seacrest-rw'
+ExecStartPre=/bin/bash -c 'test -f /var/www/Seacrest-Admin/.next/BUILD_ID'
+ExecStart=/usr/bin/node /var/www/Seacrest-Admin/node_modules/next/dist/bin/next start -p 3000
+Restart=always
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=20
+StandardOutput=append:/var/log/seacrest-next.log
+StandardError=append:/var/log/seacrest-next.log
+
+[Install]
+WantedBy=multi-user.target

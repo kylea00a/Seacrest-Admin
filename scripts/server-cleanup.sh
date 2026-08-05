@@ -29,7 +29,16 @@ echo "=== Stop Cursor on production ==="
 pkill -f '/root/.cursor-server' 2>/dev/null || true
 pkill -f 'cursor-server' 2>/dev/null || true
 
+echo "=== Disable on-server git sync/build (OOMs 2GB droplet) ==="
+systemctl stop seacrest-admin-sync.timer seacrest-admin-sync.service 2>/dev/null || true
+systemctl disable seacrest-admin-sync.timer seacrest-admin-sync.service 2>/dev/null || true
+systemctl mask seacrest-admin-sync.timer seacrest-admin-sync.service 2>/dev/null || true
+# Prevent accidental manual runs
+if [[ -f /usr/local/bin/seacrest-admin-sync ]]; then
+  mv -f /usr/local/bin/seacrest-admin-sync /usr/local/bin/seacrest-admin-sync.disabled 2>/dev/null || true
+fi
+
 echo "=== Memory ==="
 free -h
 
-echo "Done. Run: bash scripts/server-start.sh"
+echo "Done. Prefer: bash scripts/server-install-systemd.sh"

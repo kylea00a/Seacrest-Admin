@@ -37,7 +37,9 @@ jobs:
             scripts/server-start.sh \
             scripts/server-watchdog.sh \
             scripts/server-cleanup.sh \
-            scripts/server-install-watchdog.sh
+            scripts/server-install-watchdog.sh \
+            scripts/server-install-systemd.sh \
+            scripts/seacrest-admin.service
 
       - name: Upload release to server
         uses: appleboy/scp-action@v0.1.7
@@ -56,6 +58,11 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           script: |
             cd /var/www/Seacrest-Admin
+            # Never rebuild on this droplet — kill the old sync timer if present
+            systemctl stop seacrest-admin-sync.timer seacrest-admin-sync.service 2>/dev/null || true
+            systemctl disable seacrest-admin-sync.timer seacrest-admin-sync.service 2>/dev/null || true
+            systemctl mask seacrest-admin-sync.timer seacrest-admin-sync.service 2>/dev/null || true
             tar xzf release.tar.gz
             rm -f release.tar.gz
-            bash scripts/server-start.sh
+            bash scripts/server-cleanup.sh || true
+            bash scripts/server-install-systemd.sh
