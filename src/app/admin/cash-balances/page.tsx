@@ -103,10 +103,35 @@ export default function CashBalancesPage() {
     return filtered.slice(start, start + rowsPerPage);
   }, [filtered, page, rowsPerPage]);
 
+  const parseAmount = (raw: string) => {
+    const cleaned = raw.replace(/,/g, "").trim();
+    if (!cleaned) return NaN;
+    return Number(cleaned);
+  };
+
+  const customAmt = parseAmount(customAmount);
+  const canAddCustom =
+    Boolean(accountId) &&
+    Boolean(customDate) &&
+    Boolean(customDesc.trim()) &&
+    Number.isFinite(customAmt) &&
+    customAmt > 0;
+
+  const addCustomBlockedReason = !accountId
+    ? "Select a bank account first (or add one under Settings → Categories)."
+    : !customDate
+      ? "Pick a date."
+      : !Number.isFinite(customAmt) || customAmt <= 0
+        ? "Enter a positive amount."
+        : !customDesc.trim()
+          ? "Enter a description."
+          : null;
+
   const addCustom = async () => {
-    if (!accountId) return;
-    const amt = Number(customAmount);
-    if (!customDesc.trim() || !Number.isFinite(amt) || amt <= 0) return;
+    if (!canAddCustom) {
+      setError(addCustomBlockedReason ?? "Fill in date, amount, and description.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -118,7 +143,7 @@ export default function CashBalancesPage() {
           accountId,
           date: customDate,
           side: customSide,
-          amount: amt,
+          amount: customAmt,
           description: customDesc.trim(),
         }),
       });
@@ -272,30 +297,71 @@ export default function CashBalancesPage() {
 
       <div className="admin-card-inset mt-6">
         <div className="text-sm font-semibold text-zinc-200">Add custom transaction</div>
-        <div className="mt-3 flex flex-wrap items-end gap-3">
-          <div>
-            <div className="text-xs font-semibold text-zinc-400">Date</div>
-            <input type="date" value={customDate} onChange={(e) => setCustomDate(e.target.value)} className="admin-input mt-1" />
+        <form
+          className="mt-3 space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void addCustom();
+          }}
+        >
+          <div className="flex flex-wrap items-end gap-3 pr-16 sm:pr-20">
+            <div>
+              <div className="text-xs font-semibold text-zinc-400">Date</div>
+              <input
+                type="date"
+                value={customDate}
+                onChange={(e) => setCustomDate(e.target.value)}
+                className="admin-input mt-1"
+                required
+              />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-zinc-400">Side</div>
+              <select
+                value={customSide}
+                onChange={(e) => setCustomSide(e.target.value as "credit" | "debit")}
+                className="admin-select mt-1"
+              >
+                <option value="credit">Credit</option>
+                <option value="debit">Debit</option>
+              </select>
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-zinc-400">Amount</div>
+              <input
+                value={customAmount}
+                onChange={(e) => setCustomAmount(e.target.value)}
+                className="admin-input mt-1 w-32"
+                inputMode="decimal"
+                placeholder="0.00"
+                required
+              />
+            </div>
+            <div className="min-w-[16rem] flex-1">
+              <div className="text-xs font-semibold text-zinc-400">Description</div>
+              <input
+                value={customDesc}
+                onChange={(e) => setCustomDesc(e.target.value)}
+                className="admin-input mt-1 w-full"
+                placeholder="e.g. bank fee, adjustment…"
+                required
+              />
+            </div>
           </div>
-          <div>
-            <div className="text-xs font-semibold text-zinc-400">Side</div>
-            <select value={customSide} onChange={(e) => setCustomSide(e.target.value as "credit" | "debit")} className="admin-select mt-1">
-              <option value="credit">Credit</option>
-              <option value="debit">Debit</option>
-            </select>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              disabled={saving || !canAddCustom}
+              title={canAddCustom ? "Add transaction" : (addCustomBlockedReason ?? undefined)}
+              className="admin-btn-primary"
+            >
+              {saving ? "Saving…" : "Add"}
+            </button>
+            {!canAddCustom && !saving ? (
+              <span className="text-xs text-zinc-500">{addCustomBlockedReason}</span>
+            ) : null}
           </div>
-          <div>
-            <div className="text-xs font-semibold text-zinc-400">Amount</div>
-            <input value={customAmount} onChange={(e) => setCustomAmount(e.target.value)} className="admin-input mt-1 w-32" inputMode="decimal" />
-          </div>
-          <div className="min-w-[16rem] flex-1">
-            <div className="text-xs font-semibold text-zinc-400">Description</div>
-            <input value={customDesc} onChange={(e) => setCustomDesc(e.target.value)} className="admin-input mt-1 w-full" placeholder="e.g. bank fee, adjustment…" />
-          </div>
-          <button type="button" onClick={() => void addCustom()} disabled={saving || !accountId} className="admin-btn-primary">
-            {saving ? "Saving…" : "Add"}
-          </button>
-        </div>
+        </form>
       </div>
 
       <div className="mt-6">
