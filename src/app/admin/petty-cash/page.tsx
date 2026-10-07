@@ -56,6 +56,7 @@ export default function PettyCashPage() {
 
   const [soaStart, setSoaStart] = useState("");
   const [soaEnd, setSoaEnd] = useState("");
+  const [soaSearch, setSoaSearch] = useState("");
   const [rowsPerPage, setRowsPerPage] = useState<10 | 25 | 50>(25);
   const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState(false);
@@ -231,12 +232,17 @@ export default function PettyCashPage() {
   const soaFiltered = useMemo(() => {
     const start = soaStart && soaEnd && soaStart > soaEnd ? soaEnd : soaStart;
     const end = soaStart && soaEnd && soaStart > soaEnd ? soaStart : soaEnd;
+    const q = soaSearch.trim().toLowerCase();
     return soa.filter((t) => {
       if (start && t.date < start) return false;
       if (end && t.date > end) return false;
+      if (q) {
+        const hay = `${t.description ?? ""} ${t.category ?? ""} ${t.date ?? ""} ${t.kind ?? ""} ${t.debit ?? ""} ${t.credit ?? ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
       return true;
     });
-  }, [soa, soaStart, soaEnd]);
+  }, [soa, soaStart, soaEnd, soaSearch]);
 
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(soaFiltered.length / rowsPerPage)),
@@ -249,7 +255,7 @@ export default function PettyCashPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [soaStart, soaEnd, rowsPerPage]);
+  }, [soaStart, soaEnd, soaSearch, rowsPerPage]);
 
   const soaVisible = useMemo(() => {
     const start = (page - 1) * rowsPerPage;
@@ -530,6 +536,16 @@ export default function PettyCashPage() {
               <div className="mt-1 text-xs text-zinc-500">Latest first • running balance per row</div>
             </div>
             <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-[12rem] flex-1">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Search</div>
+                <input
+                  type="search"
+                  value={soaSearch}
+                  onChange={(e) => setSoaSearch(e.target.value)}
+                  placeholder="Description, category…"
+                  className="admin-input mt-1 w-full min-w-[12rem] py-1.5 text-xs"
+                />
+              </div>
               <div>
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">From</div>
                 <input
@@ -548,16 +564,17 @@ export default function PettyCashPage() {
                   className="admin-input mt-1 py-1.5 text-xs"
                 />
               </div>
-              {(soaStart || soaEnd) && (
+              {(soaStart || soaEnd || soaSearch) && (
                 <button
                   type="button"
                   className="admin-btn-secondary px-2 py-1.5 text-xs"
                   onClick={() => {
                     setSoaStart("");
                     setSoaEnd("");
+                    setSoaSearch("");
                   }}
                 >
-                  Clear dates
+                  Clear filters
                 </button>
               )}
               <button
@@ -576,6 +593,7 @@ export default function PettyCashPage() {
             <div className="font-semibold tabular-nums">
               {soaFiltered.length} of {soa.length} entries
               {soaStart || soaEnd ? ` · ${dateRangeLabel}` : ""}
+              {soaSearch.trim() ? ` · “${soaSearch.trim()}”` : ""}
             </div>
             <div className="flex items-center gap-2">
               <span>Rows</span>
