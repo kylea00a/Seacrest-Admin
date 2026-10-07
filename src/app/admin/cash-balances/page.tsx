@@ -31,6 +31,7 @@ export default function CashBalancesPage() {
   const [txns, setTxns] = useState<CashTransaction[]>([]);
 
   const [accountId, setAccountId] = useState<string>("");
+  const [soaSearch, setSoaSearch] = useState("");
   const [rowsPerPage, setRowsPerPage] = useState<25 | 50 | 100>(25);
   const [page, setPage] = useState(1);
 
@@ -74,8 +75,15 @@ export default function CashBalancesPage() {
 
   const filtered = useMemo(() => {
     const list = accountId ? txns.filter((t) => t.accountId === accountId) : txns;
-    return [...list].sort((a, b) => (b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)));
-  }, [txns, accountId]);
+    const q = soaSearch.trim().toLowerCase();
+    const matched = q
+      ? list.filter((t) => {
+          const hay = `${t.description ?? ""} ${t.date ?? ""} ${t.kind ?? ""} ${t.debit ?? ""} ${t.credit ?? ""}`.toLowerCase();
+          return hay.includes(q);
+        })
+      : list;
+    return [...matched].sort((a, b) => (b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)));
+  }, [txns, accountId, soaSearch]);
 
   const balanceByTxnId = useMemo(() => {
     if (!accountId) return new Map<string, number>();
@@ -97,6 +105,10 @@ export default function CashBalancesPage() {
   useEffect(() => {
     setPage((p) => Math.min(Math.max(1, p), totalPages));
   }, [totalPages]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [soaSearch, accountId, rowsPerPage]);
 
   const visible = useMemo(() => {
     const start = (page - 1) * rowsPerPage;
@@ -370,7 +382,26 @@ export default function CashBalancesPage() {
             <div className="text-sm font-semibold text-zinc-200">SOA</div>
             <div className="mt-1 text-xs text-zinc-500">Latest first</div>
           </div>
-          <div className="flex items-center gap-2 text-xs text-zinc-400">
+          <div className="flex flex-wrap items-end gap-2 text-xs text-zinc-400">
+            <div className="min-w-[12rem]">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Search</div>
+              <input
+                type="search"
+                value={soaSearch}
+                onChange={(e) => setSoaSearch(e.target.value)}
+                placeholder="Description, date…"
+                className="admin-input mt-1 w-full min-w-[12rem] py-1.5 text-xs"
+              />
+            </div>
+            {soaSearch.trim() ? (
+              <button
+                type="button"
+                className="admin-btn-secondary px-2 py-1.5 text-xs"
+                onClick={() => setSoaSearch("")}
+              >
+                Clear
+              </button>
+            ) : null}
             <span>Rows</span>
             <select value={rowsPerPage} onChange={(e) => setRowsPerPage(Number(e.target.value) as 25 | 50 | 100)} className="admin-select py-1 text-xs">
               <option value={25}>25</option>
@@ -378,7 +409,7 @@ export default function CashBalancesPage() {
               <option value={100}>100</option>
             </select>
             <span className="tabular-nums">
-              Page {page} / {totalPages}
+              {filtered.length} · Page {page} / {totalPages}
             </span>
             <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} className="admin-btn-secondary px-2 py-1 text-xs disabled:opacity-50">
               Prev
@@ -405,7 +436,7 @@ export default function CashBalancesPage() {
               {visible.length === 0 ? (
                 <tr>
                   <td className="px-3 py-4 text-zinc-500" colSpan={canDelete ? 6 : 5}>
-                    No transactions yet.
+                    {soaSearch.trim() ? "No transactions match this search." : "No transactions yet."}
                   </td>
                 </tr>
               ) : (
