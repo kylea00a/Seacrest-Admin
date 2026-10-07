@@ -3,13 +3,13 @@ import {
   loadCashLedger,
   loadExpenses,
   loadPettyCashLedger,
-  loadPettyCashState,
   saveCashLedger,
   saveExpenses,
   savePettyCashLedger,
   savePettyCashState,
 } from "@/data/admin/storage";
 import type { PaymentStatus, PettyCashLedgerTransaction } from "@/data/admin/types";
+import { isRecurringExpenseFrequency } from "@/data/admin/recurrence";
 import { requireApiPermission } from "@/lib/adminApiAuth";
 import { randomUUID } from "crypto";
 
@@ -18,6 +18,10 @@ export const runtime = "nodejs";
 
 function isPaymentStatus(v: unknown): v is PaymentStatus {
   return v === "paid" || v === "unpaid";
+}
+
+function isDateOnly(v: unknown): v is string {
+  return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 }
 
 export async function POST(req: Request) {
@@ -29,6 +33,7 @@ export async function POST(req: Request) {
     paymentStatus?: unknown;
     deductFrom?: unknown;
     action?: unknown;
+    date?: unknown;
   };
   const expenseId = typeof body.expenseId === "string" ? body.expenseId.trim() : "";
   if (!expenseId) return NextResponse.json({ error: "Missing `expenseId`." }, { status: 400 });
@@ -37,6 +42,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Missing/invalid `paymentStatus`." }, { status: 400 });
   }
   const desiredStatus: PaymentStatus | null = action === "reject" ? null : (body.paymentStatus as PaymentStatus);
+  const occurrenceDate = isDateOnly(body.date) ? body.date : "";
 
   const expenses = loadExpenses();
   const idx = expenses.findIndex((e) => e.id === expenseId);
@@ -51,20 +57,45 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, expense: next });
   }
 
-  if (prev.paymentStatus === "paid" && desiredStatus === "unpaid") {
+  const recurring = isRecurringExpenseFrequency(prev.frequency);
+  if (recurring && !occurrenceDate) {
+    return NextResponse.json(
+      { error: "Missing `date` (YYYY-MM-DD) for the occurrence you are marking paid/unpaid." },
+      { status: 400 },
+    );
+  }
+
+  if (!recurring && prev.paymentStatus === "paid" && desiredStatus === "unpaid") {
     return NextResponse.json(
       { error: "Paid expenses cannot be toggled back to unpaid from the calendar. Edit it in the Expenses page instead." },
       { status: 400 },
     );
   }
 
-  const next = { ...expenses[idx], paymentStatus: desiredStatus as PaymentStatus };
+  let next = { ...prev };
+  if (recurring) {
+    const paidSet = new Set(Array.isArray(prev.paidDates) ? prev.paidDates : []);
+    if (desiredStatus === "paid") paidSet.add(occurrenceDate);
+    else paidSet.delete(occurrenceDate);
+    const paidDates = Array.from(paidSet).sort();
+    next = {
+      ...prev,
+      paidDates,
+      // Keep template status unpaid for recurring so the series stays active on the calendar.
+      paymentStatus: "unpaid",
+    };
+  } else {
+    next = { ...prev, paymentStatus: desiredStatus as PaymentStatus };
+  }
+
   expenses[idx] = next;
   saveExpenses(expenses);
 
-  // When marking paid, write a corresponding SOA entry (bank ledger or petty cash) on approval date.
+  // When marking paid, write a corresponding SOA entry (bank ledger or petty cash) on the occurrence date.
   const now = new Date();
-  const ymd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const ledgerDate =
+    occurrenceDate ||
+    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const deduct = body.deductFrom && typeof body.deductFrom === "object" ? (body.deductFrom as Record<string, unknown>) : null;
   const deductType = typeof deduct?.type === "string" ? (deduct.type as string) : "";
   const deductAccountId = typeof deduct?.accountId === "string" ? (deduct.accountId as string).trim() : "";
@@ -81,18 +112,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Expense amount must be > 0 to record payment." }, { status: 400 });
     }
 
+    const desc = recurring ? `bill-${prev.title} (${ledgerDate})` : `bill-${prev.title}`;
+
     if (deductType === "bank") {
       const file = loadCashLedger();
       if (!file.accounts.some((a) => a.id === deductAccountId)) {
         return NextResponse.json({ error: "Bank account not found." }, { status: 404 });
       }
-      // Idempotent: remove existing bill payment entry for this expenseId first.
-      file.transactions = file.transactions.filter((t) => !(t.kind === "bill_payment" && t.expenseId === expenseId));
+      // Idempotent per expense + occurrence date (recurring) or expense id (one-time).
+      file.transactions = file.transactions.filter((t) => {
+        if (t.kind !== "bill_payment" || t.expenseId !== expenseId) return true;
+        if (recurring) return t.date !== ledgerDate;
+        return false;
+      });
       file.transactions.unshift({
         id: randomUUID(),
         accountId: deductAccountId,
-        date: ymd,
-        description: `bill-${prev.title}`,
+        date: ledgerDate,
+        description: desc,
         debit: amt,
         credit: 0,
         kind: "bill_payment",
@@ -102,12 +139,15 @@ export async function POST(req: Request) {
       saveCashLedger(file);
     } else {
       const ledger = loadPettyCashLedger();
-      // Idempotent: remove existing bill payment entry for this expenseId.
-      const nextLedger = ledger.filter((t) => !(t.kind === "bill_payment" && t.expenseId === expenseId));
+      const nextLedger = ledger.filter((t) => {
+        if (t.kind !== "bill_payment" || t.expenseId !== expenseId) return true;
+        if (recurring) return t.date !== ledgerDate;
+        return false;
+      });
       const tx: PettyCashLedgerTransaction = {
         id: randomUUID(),
-        date: ymd,
-        description: `bill-${prev.title}`,
+        date: ledgerDate,
+        description: desc,
         debit: amt,
         credit: 0,
         kind: "bill_payment",
@@ -123,8 +163,5 @@ export async function POST(req: Request) {
     }
   }
 
-  // Note: toggling paid -> unpaid is blocked (see above).
-
   return NextResponse.json({ ok: true, expense: next });
 }
-

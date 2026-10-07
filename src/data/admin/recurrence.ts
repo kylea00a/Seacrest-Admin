@@ -1,8 +1,21 @@
-import type { Expense, ExpenseFrequency } from "./types";
+import type { Expense, ExpenseFrequency, PaymentStatus } from "./types";
 
 function parseDateOnly(dateOnly: string): Date {
   // Treat as local midnight to avoid time zone surprises.
   return new Date(`${dateOnly}T00:00:00`);
+}
+
+/** Recurring frequencies use per-occurrence `paidDates`; one-time uses template `paymentStatus`. */
+export function isRecurringExpenseFrequency(frequency: ExpenseFrequency): boolean {
+  return frequency !== "once";
+}
+
+export function getExpenseOccurrencePaymentStatus(expense: Expense, occurrenceDate: string): PaymentStatus {
+  if (!isRecurringExpenseFrequency(expense.frequency)) {
+    return expense.paymentStatus ?? "unpaid";
+  }
+  const paid = Array.isArray(expense.paidDates) ? expense.paidDates : [];
+  return paid.includes(occurrenceDate) ? "paid" : "unpaid";
 }
 
 function toDateOnly(d: Date): string {
@@ -33,7 +46,11 @@ export function getExpenseOccurrencesInRange(
   rangeEnd: Date
 ): string[] {
   const start = startOfDay(parseDateOnly(expense.startDate));
-  const end = startOfDay(rangeEnd);
+  let end = startOfDay(rangeEnd);
+  if (expense.endDate && /^\d{4}-\d{2}-\d{2}$/.test(expense.endDate)) {
+    const expenseEnd = startOfDay(parseDateOnly(expense.endDate));
+    if (expenseEnd < end) end = expenseEnd;
+  }
   const rangeStartDay = startOfDay(rangeStart);
 
   if (end < start) return [];

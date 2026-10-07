@@ -1,5 +1,5 @@
 import type { CalendarEvent, Department, Expense, Reminder } from "./types";
-import { getExpenseOccurrencesInRange } from "./recurrence";
+import { getExpenseOccurrencePaymentStatus, getExpenseOccurrencesInRange } from "./recurrence";
 
 function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -24,7 +24,6 @@ export function buildCalendarEventsForMonth(params: {
     const occurrences = getExpenseOccurrencesInRange(expense, start, end);
     const dept = expense.departmentId ? deptById.get(expense.departmentId) : undefined;
     const departmentName = dept?.name ?? "General";
-    const paymentStatus = expense.paymentStatus ?? "unpaid";
 
     for (const date of occurrences) {
       events.push({
@@ -35,7 +34,7 @@ export function buildCalendarEventsForMonth(params: {
         category: expense.category,
         departmentName,
         frequency: expense.frequency,
-        paymentStatus,
+        paymentStatus: getExpenseOccurrencePaymentStatus(expense, date),
         kind: "bill",
       });
     }

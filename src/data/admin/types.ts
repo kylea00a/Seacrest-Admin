@@ -35,6 +35,11 @@ export interface Expense {
   frequency: ExpenseFrequency;
   startDate: string; // YYYY-MM-DD (date-only)
   /**
+   * Optional end of the recurrence window (inclusive YYYY-MM-DD).
+   * Occurrences after this date are not generated.
+   */
+  endDate?: string;
+  /**
    * When `frequency` is `customMonths`: repeat every N months (e.g. 3 = every 3 months).
    * If omitted, treated as 1 month.
    */
@@ -45,7 +50,16 @@ export interface Expense {
   repeatCount?: number;
   departmentId?: string;
   notes?: string;
+  /**
+   * Template-level status. For one-time expenses this is the source of truth.
+   * For recurring expenses, prefer `paidDates` (per occurrence); this field is legacy/display only.
+   */
   paymentStatus?: PaymentStatus; // if omitted, treated as "unpaid"
+  /**
+   * Occurrence dates (YYYY-MM-DD) marked paid for recurring expenses.
+   * Paying one month only adds that date — other months stay unpaid.
+   */
+  paidDates?: string[];
   /**
    * If true, this expense was created as a request (employee-submitted) and must be approved (paid) or rejected.
    * Calendar only shows requested expenses while pending.

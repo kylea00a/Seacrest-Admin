@@ -48,6 +48,7 @@ export default function AddExpensePage() {
     category: string;
     frequency: ExpenseFrequency;
     startDate: string;
+    endDate: string;
     departmentId: string;
     notes: string;
     paymentStatus: PaymentStatus;
@@ -60,6 +61,7 @@ export default function AddExpensePage() {
   const [repeatEveryMonths, setRepeatEveryMonths] = useState<string>("3");
   const [repeatCount, setRepeatCount] = useState<string>("");
   const [startDate, setStartDate] = useState<string>(todayISO());
+  const [endDate, setEndDate] = useState<string>("");
   const [departmentId, setDepartmentId] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("unpaid");
@@ -142,6 +144,10 @@ export default function AddExpensePage() {
     if (!Number.isFinite(amt)) return setError("Amount must be a valid number.");
     if (!category.trim()) return setError("Category is required.");
     if (!startDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return setError("Start date is required.");
+    if (endDate) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return setError("End date must be YYYY-MM-DD.");
+      if (endDate < startDate) return setError("End date must be on or after start date.");
+    }
 
     const body: Record<string, unknown> = {
       title: title.trim(),
@@ -149,9 +155,10 @@ export default function AddExpensePage() {
       category: category.trim(),
       frequency,
       startDate,
+      ...(endDate ? { endDate } : {}),
       departmentId: departmentId ? departmentId : undefined,
       notes: notes.trim() ? notes.trim() : undefined,
-      paymentStatus,
+      paymentStatus: frequency === "once" ? paymentStatus : "unpaid",
     };
     if (frequency === "customMonths") {
       const every = Number(repeatEveryMonths);
@@ -190,11 +197,19 @@ export default function AddExpensePage() {
       category: String(exp.category),
       frequency: exp.frequency,
       startDate: exp.startDate,
+      endDate: exp.endDate ?? "",
       departmentId: exp.departmentId ?? "",
       notes: exp.notes ?? "",
       paymentStatus: exp.paymentStatus ?? "unpaid",
     });
     setEditOpen(true);
+  };
+
+  const statusLabel = (exp: Expense) => {
+    if (exp.frequency === "once") return exp.paymentStatus ?? "unpaid";
+    const n = Array.isArray(exp.paidDates) ? exp.paidDates.length : 0;
+    if (n === 0) return "unpaid";
+    return `${n} paid`;
   };
 
   const saveEdit = async () => {
@@ -207,6 +222,10 @@ export default function AddExpensePage() {
       if (!Number.isFinite(amt)) throw new Error("Amount must be a valid number.");
       if (!editDraft.category.trim()) throw new Error("Category is required.");
       if (!editDraft.startDate || !/^\d{4}-\d{2}-\d{2}$/.test(editDraft.startDate)) throw new Error("Start date is required.");
+      if (editDraft.endDate) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(editDraft.endDate)) throw new Error("End date must be YYYY-MM-DD.");
+        if (editDraft.endDate < editDraft.startDate) throw new Error("End date must be on or after start date.");
+      }
 
       const res = await fetch("/api/admin/expenses", {
         method: "PUT",
@@ -218,9 +237,10 @@ export default function AddExpensePage() {
           category: editDraft.category.trim(),
           frequency: editDraft.frequency,
           startDate: editDraft.startDate,
+          endDate: editDraft.endDate.trim() ? editDraft.endDate.trim() : "",
           departmentId: editDraft.departmentId ? editDraft.departmentId : undefined,
           notes: editDraft.notes.trim() ? editDraft.notes.trim() : undefined,
-          paymentStatus: editDraft.paymentStatus,
+          ...(editDraft.frequency === "once" ? { paymentStatus: editDraft.paymentStatus } : {}),
         }),
       });
       const json = (await res.json()) as { ok?: boolean; expense?: Expense; error?: string };
@@ -376,19 +396,41 @@ export default function AddExpensePage() {
             </div>
 
             <div>
-              <label className="text-sm font-semibold">Payment Status</label>
-              <select
-                value={paymentStatus}
-                onChange={(e) => setPaymentStatus(e.target.value as PaymentStatus)}
-                className="mt-1 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500/60"
-              >
-                {PAYMENT_STATUSES.map((s) => (
-                  <option value={s.value} key={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
+              <label className="text-sm font-semibold">
+                End Date {frequency === "once" ? "(n/a)" : "(optional)"}
+              </label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                disabled={frequency === "once"}
+                className="mt-1 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500/60 disabled:opacity-50"
+              />
+              {frequency !== "once" ? (
+                <div className="mt-1 text-[11px] text-zinc-500">Monthly only within this period. Leave blank for ongoing.</div>
+              ) : null}
             </div>
+
+            {frequency === "once" ? (
+              <div>
+                <label className="text-sm font-semibold">Payment Status</label>
+                <select
+                  value={paymentStatus}
+                  onChange={(e) => setPaymentStatus(e.target.value as PaymentStatus)}
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500/60"
+                >
+                  {PAYMENT_STATUSES.map((s) => (
+                    <option value={s.value} key={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-zinc-400 sm:col-span-2">
+                Recurring bills are marked paid per month on the Calendar. Paying one month does not affect the others.
+              </div>
+            )}
 
             <div>
               <label className="text-sm font-semibold">Notes (optional)</label>
@@ -435,7 +477,7 @@ export default function AddExpensePage() {
             <span className="font-semibold">Weekly</span> repeats on the same weekday as Start Date.
           </div>
           <div>
-            <span className="font-semibold">Monthly</span> repeats on the Start Date day-of-month (clamped to month end if needed).
+            <span className="font-semibold">Monthly</span> repeats on the Start Date day-of-month (clamped to month end if needed). Use End Date to limit the period. Mark each month paid on the Calendar — other months stay.
           </div>
           <div>
             <span className="font-semibold">Quarterly</span> repeats every 3 months (same day-of-month).
@@ -476,6 +518,7 @@ export default function AddExpensePage() {
                   <th className="px-3 py-2 text-left">Dept</th>
                   <th className="px-3 py-2 text-left">Frequency</th>
                   <th className="px-3 py-2 text-left whitespace-nowrap">Start</th>
+                  <th className="px-3 py-2 text-left whitespace-nowrap">End</th>
                   <th className="px-3 py-2 text-left">Status</th>
                   <th className="px-3 py-2 text-right">Actions</th>
                 </tr>
@@ -483,7 +526,7 @@ export default function AddExpensePage() {
               <tbody className="divide-y divide-white/10">
                 {allExpenses.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-4 text-zinc-500" colSpan={8}>
+                    <td className="px-3 py-4 text-zinc-500" colSpan={9}>
                       No expenses yet.
                     </td>
                   </tr>
@@ -504,9 +547,10 @@ export default function AddExpensePage() {
                         <td className="px-3 py-2">{e.departmentId ? deptNameById.get(e.departmentId) ?? "—" : "General"}</td>
                         <td className="px-3 py-2">{e.frequency}</td>
                         <td className="px-3 py-2 whitespace-nowrap text-zinc-300">{e.startDate}</td>
+                        <td className="px-3 py-2 whitespace-nowrap text-zinc-300">{e.endDate ?? "—"}</td>
                         <td className="px-3 py-2">
                           <span className="rounded-full border border-white/15 bg-white/10 px-2 py-0.5 text-[10px] font-bold text-zinc-200">
-                            {e.paymentStatus ?? "unpaid"}
+                            {statusLabel(e)}
                           </span>
                           {e.isRequest && e.requestStatus === "rejected" ? (
                             <span className="ml-2 rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[10px] font-bold text-rose-200">
@@ -581,20 +625,26 @@ export default function AddExpensePage() {
                   inputMode="decimal"
                 />
               </div>
-              <div>
-                <div className="text-xs font-semibold text-zinc-400">Payment status</div>
-                <select
-                  value={editDraft.paymentStatus}
-                  onChange={(e) => setEditDraft((p) => (p ? { ...p, paymentStatus: e.target.value as PaymentStatus } : p))}
-                  className="admin-select mt-1 w-full"
-                >
-                  {PAYMENT_STATUSES.map((s) => (
-                    <option key={s.value} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {editDraft.frequency === "once" ? (
+                <div>
+                  <div className="text-xs font-semibold text-zinc-400">Payment status</div>
+                  <select
+                    value={editDraft.paymentStatus}
+                    onChange={(e) => setEditDraft((p) => (p ? { ...p, paymentStatus: e.target.value as PaymentStatus } : p))}
+                    className="admin-select mt-1 w-full"
+                  >
+                    {PAYMENT_STATUSES.map((s) => (
+                      <option key={s.value} value={s.value}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-zinc-400">
+                  Mark each month paid on the Calendar. One month paid does not hide the rest.
+                </div>
+              )}
               <div>
                 <div className="text-xs font-semibold text-zinc-400">Category</div>
                 <input
@@ -624,6 +674,16 @@ export default function AddExpensePage() {
                   value={editDraft.startDate}
                   onChange={(e) => setEditDraft((p) => (p ? { ...p, startDate: e.target.value } : p))}
                   className="admin-input mt-1 w-full"
+                />
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-zinc-400">End date (optional)</div>
+                <input
+                  type="date"
+                  value={editDraft.endDate}
+                  onChange={(e) => setEditDraft((p) => (p ? { ...p, endDate: e.target.value } : p))}
+                  disabled={editDraft.frequency === "once"}
+                  className="admin-input mt-1 w-full disabled:opacity-50"
                 />
               </div>
               <div>

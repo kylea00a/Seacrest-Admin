@@ -13,6 +13,7 @@ type ExpenseCreateBody = {
   category?: unknown;
   frequency?: unknown;
   startDate?: unknown;
+  endDate?: unknown;
   repeatEveryMonths?: unknown;
   repeatCount?: unknown;
   departmentId?: unknown;
@@ -86,6 +87,20 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Missing or invalid `startDate` (YYYY-MM-DD)." }, { status: 400 });
   }
 
+  const endDateRaw = body.endDate;
+  const endDate =
+    endDateRaw == null || endDateRaw === ""
+      ? undefined
+      : isDateOnly(endDateRaw)
+        ? endDateRaw
+        : null;
+  if (endDate === null) {
+    return NextResponse.json({ error: "Invalid `endDate` (YYYY-MM-DD)." }, { status: 400 });
+  }
+  if (endDate && endDate < startDate) {
+    return NextResponse.json({ error: "`endDate` must be on or after `startDate`." }, { status: 400 });
+  }
+
   const amountRaw = body.amount;
   const amount = typeof amountRaw === "number" ? amountRaw : typeof amountRaw === "string" ? Number(amountRaw) : NaN;
   if (!Number.isFinite(amount)) {
@@ -119,11 +134,13 @@ export async function POST(req: Request) {
     category,
     frequency,
     startDate,
+    ...(endDate ? { endDate } : {}),
     ...(repeatEveryMonths ? { repeatEveryMonths } : {}),
     ...(repeatCount ? { repeatCount } : {}),
     departmentId,
     notes,
-    paymentStatus: isRequestor ? "unpaid" : paymentStatus,
+    paymentStatus: isRequestor ? "unpaid" : frequency === "once" ? paymentStatus : "unpaid",
+    ...(frequency !== "once" ? { paidDates: [] as string[] } : {}),
     ...(isRequestor
       ? {
           isRequest: true,
@@ -155,20 +172,40 @@ export async function PUT(req: Request) {
   if (idx < 0) return NextResponse.json({ error: "Expense not found." }, { status: 404 });
 
   const prev = expenses[idx];
+  const nextFreq = typeof body.frequency === "string" && isFrequency(body.frequency) ? body.frequency : prev.frequency;
+  const nextStart =
+    typeof body.startDate === "string" && isDateOnly(body.startDate) ? body.startDate : prev.startDate;
+
+  let nextEndDate = prev.endDate;
+  if ("endDate" in body) {
+    if (body.endDate == null || body.endDate === "") nextEndDate = undefined;
+    else if (typeof body.endDate === "string" && isDateOnly(body.endDate)) nextEndDate = body.endDate;
+    else return NextResponse.json({ error: "Invalid `endDate` (YYYY-MM-DD)." }, { status: 400 });
+  }
+  if (nextEndDate && nextEndDate < nextStart) {
+    return NextResponse.json({ error: "`endDate` must be on or after `startDate`." }, { status: 400 });
+  }
+
   const next: Expense = {
     ...prev,
     ...(typeof body.title === "string" && body.title.trim() ? { title: body.title.trim() } : {}),
     ...(typeof body.category === "string" && body.category.trim() ? { category: body.category.trim() } : {}),
     ...(typeof body.amount === "number" && Number.isFinite(body.amount) ? { amount: body.amount } : {}),
-    ...(typeof body.frequency === "string" && isFrequency(body.frequency) ? { frequency: body.frequency } : {}),
-    ...(typeof body.startDate === "string" && isDateOnly(body.startDate) ? { startDate: body.startDate } : {}),
+    frequency: nextFreq,
+    startDate: nextStart,
+    endDate: nextEndDate,
     ...(typeof body.repeatEveryMonths === "number" && Number.isFinite(body.repeatEveryMonths)
       ? { repeatEveryMonths: body.repeatEveryMonths }
       : {}),
     ...(typeof body.repeatCount === "number" && Number.isFinite(body.repeatCount) ? { repeatCount: body.repeatCount } : {}),
     ...(typeof body.departmentId === "string" ? { departmentId: body.departmentId || undefined } : {}),
     ...(typeof body.notes === "string" ? { notes: body.notes.trim() ? body.notes.trim() : undefined } : {}),
-    ...(body.paymentStatus && isPaymentStatus(body.paymentStatus) ? { paymentStatus: body.paymentStatus } : {}),
+    // Template paymentStatus only applies to one-time expenses.
+    ...(nextFreq === "once" && body.paymentStatus && isPaymentStatus(body.paymentStatus)
+      ? { paymentStatus: body.paymentStatus }
+      : nextFreq !== "once"
+        ? { paymentStatus: "unpaid" }
+        : {}),
   };
 
   expenses[idx] = next;
@@ -191,4 +228,3 @@ export async function DELETE(req: Request) {
   saveExpenses(next);
   return NextResponse.json({ ok: true });
 }
-
