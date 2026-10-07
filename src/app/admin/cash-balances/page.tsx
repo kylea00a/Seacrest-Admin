@@ -82,7 +82,9 @@ export default function CashBalancesPage() {
           return hay.includes(q);
         })
       : list;
-    return [...matched].sort((a, b) => (b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)));
+    return [...matched].sort(
+      (a, b) => b.date.localeCompare(a.date) || (b.createdAt ?? "").localeCompare(a.createdAt ?? ""),
+    );
   }, [txns, accountId, soaSearch]);
 
   const balanceByTxnId = useMemo(() => {
@@ -90,7 +92,7 @@ export default function CashBalancesPage() {
     const list = txns
       .filter((t) => t.accountId === accountId)
       // Oldest → newest for running balance computation
-      .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
+      .sort((a, b) => a.date.localeCompare(b.date) || (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
     const map = new Map<string, number>();
     let b = 0;
     for (const t of list) {
