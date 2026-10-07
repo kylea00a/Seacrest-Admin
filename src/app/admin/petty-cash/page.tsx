@@ -54,6 +54,12 @@ export default function PettyCashPage() {
   const availableBalance = state?.balance ?? 0;
   const canEdit = can("pettyCashEdit") || account?.isSuperadmin;
 
+  const [soaStart, setSoaStart] = useState("");
+  const [soaEnd, setSoaEnd] = useState("");
+  const [rowsPerPage, setRowsPerPage] = useState<10 | 25 | 50>(25);
+  const [page, setPage] = useState(1);
+  const [exporting, setExporting] = useState(false);
+
   const load = async () => {
     setLoading(true);
     setError(null);
@@ -219,6 +225,83 @@ export default function PettyCashPage() {
     // Display latest first
     return withBal.sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
   }, [ledger]);
+
+  const soaFiltered = useMemo(() => {
+    const start = soaStart && soaEnd && soaStart > soaEnd ? soaEnd : soaStart;
+    const end = soaStart && soaEnd && soaStart > soaEnd ? soaStart : soaEnd;
+    return soa.filter((t) => {
+      if (start && t.date < start) return false;
+      if (end && t.date > end) return false;
+      return true;
+    });
+  }, [soa, soaStart, soaEnd]);
+
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(soaFiltered.length / rowsPerPage)),
+    [soaFiltered.length, rowsPerPage],
+  );
+
+  useEffect(() => {
+    setPage((p) => Math.min(Math.max(1, p), totalPages));
+  }, [totalPages]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [soaStart, soaEnd, rowsPerPage]);
+
+  const soaVisible = useMemo(() => {
+    const start = (page - 1) * rowsPerPage;
+    return soaFiltered.slice(start, start + rowsPerPage);
+  }, [soaFiltered, page, rowsPerPage]);
+
+  const dateRangeLabel = useMemo(() => {
+    if (soaStart && soaEnd) {
+      const a = soaStart <= soaEnd ? soaStart : soaEnd;
+      const b = soaStart <= soaEnd ? soaEnd : soaStart;
+      return a === b ? a : `${a} to ${b}`;
+    }
+    if (soaStart) return `from ${soaStart}`;
+    if (soaEnd) return `until ${soaEnd}`;
+    return "all dates";
+  }, [soaStart, soaEnd]);
+
+  const exportSoa = async () => {
+    if (!soaFiltered.length) {
+      setError("No SOA rows in the selected date range to export.");
+      return;
+    }
+    setExporting(true);
+    setError(null);
+    try {
+      const { buildPettyCashSoaWorkbookBuffer } = await import("@/lib/pettyCashSoaExport");
+      const buf = await buildPettyCashSoaWorkbookBuffer(
+        soaFiltered.map((t) => ({
+          date: t.date,
+          description: t.description,
+          category: t.category,
+          debit: t.debit ?? 0,
+          credit: t.credit ?? 0,
+          runningBalance: t.runningBalance,
+        })),
+        dateRangeLabel,
+      );
+      const blob = new Blob([buf], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      const start = soaStart || "all";
+      const end = soaEnd || "all";
+      a.download = `petty-cash-soa-${start}-to-${end}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const pettyCategories = useMemo(() => {
     const list = settings?.pettyCashCategories?.length ? settings.pettyCashCategories : ["Miscellaneous"];
     return Array.from(new Set(list.map((s) => s.trim()).filter(Boolean)));
@@ -444,7 +527,85 @@ export default function PettyCashPage() {
               <div className="text-sm font-semibold text-zinc-200">SOA</div>
               <div className="mt-1 text-xs text-zinc-500">Latest first • running balance per row</div>
             </div>
-            <div className="text-xs font-semibold text-zinc-400">{soa.length} entries</div>
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">From</div>
+                <input
+                  type="date"
+                  value={soaStart}
+                  onChange={(e) => setSoaStart(e.target.value)}
+                  className="admin-input mt-1 py-1.5 text-xs"
+                />
+              </div>
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">To</div>
+                <input
+                  type="date"
+                  value={soaEnd}
+                  onChange={(e) => setSoaEnd(e.target.value)}
+                  className="admin-input mt-1 py-1.5 text-xs"
+                />
+              </div>
+              {(soaStart || soaEnd) && (
+                <button
+                  type="button"
+                  className="admin-btn-secondary px-2 py-1.5 text-xs"
+                  onClick={() => {
+                    setSoaStart("");
+                    setSoaEnd("");
+                  }}
+                >
+                  Clear dates
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={exporting || loading || soaFiltered.length === 0}
+                className="admin-btn-secondary px-3 py-1.5 text-xs"
+                title="Export filtered SOA rows to Excel"
+                onClick={() => void exportSoa()}
+              >
+                {exporting ? "Exporting…" : "Export Excel"}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-400">
+            <div className="font-semibold tabular-nums">
+              {soaFiltered.length} of {soa.length} entries
+              {soaStart || soaEnd ? ` · ${dateRangeLabel}` : ""}
+            </div>
+            <div className="flex items-center gap-2">
+              <span>Rows</span>
+              <select
+                value={rowsPerPage}
+                onChange={(e) => setRowsPerPage(Number(e.target.value) as 10 | 25 | 50)}
+                className="admin-select py-1 text-xs"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+              </select>
+              <span className="tabular-nums">
+                Page {page} / {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="admin-btn-secondary px-2 py-1 text-xs disabled:opacity-50"
+              >
+                Prev
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="admin-btn-secondary px-2 py-1 text-xs disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
           </div>
 
           <div className="admin-table-wrap mt-3 overflow-x-auto">
@@ -460,14 +621,14 @@ export default function PettyCashPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10">
-                {soa.length === 0 ? (
+                {soaVisible.length === 0 ? (
                   <tr>
                     <td className="px-3 py-4 text-zinc-500" colSpan={canEdit ? 6 : 5}>
-                      No SOA entries yet.
+                      {soa.length === 0 ? "No SOA entries yet." : "No SOA entries in this date range."}
                     </td>
                   </tr>
                 ) : (
-                  soa.slice(0, 150).map((t) => (
+                  soaVisible.map((t) => (
                     <tr key={t.id} className="bg-black/10 text-zinc-100">
                       <td className="px-3 py-2 whitespace-nowrap text-zinc-300">{t.date}</td>
                       <td className="px-3 py-2">{t.description}</td>
