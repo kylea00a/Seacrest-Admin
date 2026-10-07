@@ -214,6 +214,8 @@ export default function PettyCashPage() {
   };
 
   const pending = useMemo(() => requests.filter((r) => r.status === "pending"), [requests]);
+  const approvedCount = useMemo(() => requests.filter((r) => r.status === "approved").length, [requests]);
+  const pendingCount = pending.length;
 
   const soa = useMemo(() => {
     const list = [...ledger].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
@@ -669,6 +671,17 @@ export default function PettyCashPage() {
       <div className="admin-card">
         <div className="text-sm font-semibold">All Requests</div>
         <div className="mt-1 text-xs text-zinc-300">Latest first</div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-3 text-center">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-emerald-300/90">Approved</div>
+            <div className="mt-1 text-2xl font-bold tabular-nums text-emerald-100">{approvedCount}</div>
+          </div>
+          <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-3 text-center">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-amber-300/90">Pending</div>
+            <div className="mt-1 text-2xl font-bold tabular-nums text-amber-100">{pendingCount}</div>
+          </div>
+        </div>
 
         <div className="mt-4 space-y-2">
           {requests.length === 0 ? (
