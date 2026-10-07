@@ -34,6 +34,9 @@ const EXPENSES_FILE = path.join(ADMIN_DATA_DIR, "expenses.json");
 const PETTY_CASH_STATE_FILE = path.join(ADMIN_DATA_DIR, "pettyCash.json");
 const PETTY_CASH_REQUESTS_FILE = path.join(ADMIN_DATA_DIR, "pettyCashRequests.json");
 const PETTY_CASH_LEDGER_FILE = path.join(ADMIN_DATA_DIR, "pettyCashLedger.json");
+const PETTY_GCASH_STATE_FILE = path.join(ADMIN_DATA_DIR, "pettyGCash.json");
+const PETTY_GCASH_REQUESTS_FILE = path.join(ADMIN_DATA_DIR, "pettyGCashRequests.json");
+const PETTY_GCASH_LEDGER_FILE = path.join(ADMIN_DATA_DIR, "pettyGCashLedger.json");
 const SETTINGS_FILE = path.join(ADMIN_DATA_DIR, "settings.json");
 const ORDERS_INDEX_FILE = path.join(ADMIN_DATA_DIR, "ordersIndex.json");
 const ORDERS_SEARCH_INDEX_FILE = path.join(ADMIN_DATA_DIR, "ordersSearchIndex.json");
@@ -168,6 +171,33 @@ export function savePettyCashLedger(txns: PettyCashLedgerTransaction[]) {
   writeJsonFile(PETTY_CASH_LEDGER_FILE, txns);
 }
 
+export function loadPettyGCashState(): PettyCashState {
+  return readJsonFile<PettyCashState>(PETTY_GCASH_STATE_FILE, {
+    balance: 0,
+    updatedAt: new Date(0).toISOString(),
+  });
+}
+
+export function savePettyGCashState(state: PettyCashState) {
+  writeJsonFile(PETTY_GCASH_STATE_FILE, state);
+}
+
+export function loadPettyGCashRequests(): PettyCashRequest[] {
+  return readJsonFile<PettyCashRequest[]>(PETTY_GCASH_REQUESTS_FILE, []);
+}
+
+export function savePettyGCashRequests(requests: PettyCashRequest[]) {
+  writeJsonFile(PETTY_GCASH_REQUESTS_FILE, requests);
+}
+
+export function loadPettyGCashLedger(): PettyCashLedgerTransaction[] {
+  return readJsonFile<PettyCashLedgerTransaction[]>(PETTY_GCASH_LEDGER_FILE, []);
+}
+
+export function savePettyGCashLedger(txns: PettyCashLedgerTransaction[]) {
+  writeJsonFile(PETTY_GCASH_LEDGER_FILE, txns);
+}
+
 function num(v: unknown, fallback = 0): number {
   if (typeof v === "number" && Number.isFinite(v)) return v;
   if (typeof v === "string") {
@@ -231,6 +261,7 @@ export function loadAdminSettings(): AdminSettings {
   const fallback: AdminSettings = {
     expenseCategories: ["BIR", "Rent", "Utility", "Maintenance", "Payroll", "Supplies", "Other"],
     pettyCashCategories: ["Miscellaneous"],
+    pettyGCashCategories: ["Miscellaneous"],
     packages: [
       { name: "Starter", code: "Starter-P998", packagePrice: 998, affiliatePrice: 998, weight: 0 },
       { name: "Standard", code: "Standard-P2996", packagePrice: 2996, affiliatePrice: 2996, weight: 0 },
@@ -258,6 +289,9 @@ export function loadAdminSettings(): AdminSettings {
   const pettyCashCategories = Array.isArray(loaded.pettyCashCategories)
     ? (loaded.pettyCashCategories as string[]).filter(Boolean)
     : fallback.pettyCashCategories;
+  const pettyGCashCategories = Array.isArray(loaded.pettyGCashCategories)
+    ? (loaded.pettyGCashCategories as string[]).filter(Boolean)
+    : fallback.pettyGCashCategories;
   const productAbbreviations = normalizeProductAbbreviations(loaded.productAbbreviations);
   const allowSuperadminEditEncodedInventory =
     typeof loaded.allowSuperadminEditEncodedInventory === "boolean"
@@ -266,6 +300,7 @@ export function loadAdminSettings(): AdminSettings {
   return {
     expenseCategories: expenseCategories.length ? expenseCategories : fallback.expenseCategories,
     pettyCashCategories: pettyCashCategories.length ? pettyCashCategories : fallback.pettyCashCategories,
+    pettyGCashCategories: pettyGCashCategories.length ? pettyGCashCategories : fallback.pettyGCashCategories,
     packages: migratePackages(loaded.packages, fallback.packages),
     products: migrateProducts(loaded.products, fallback.products),
     productAbbreviations: Object.keys(productAbbreviations).length ? productAbbreviations : undefined,
@@ -519,4 +554,3 @@ export function loadInventoryFlow(): InventoryFlowFile {
 export function saveInventoryFlow(data: InventoryFlowFile) {
   writeJsonFile(INVENTORY_FLOW_FILE, data);
 }
-

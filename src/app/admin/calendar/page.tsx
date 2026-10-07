@@ -65,6 +65,7 @@ export default function CalendarPage() {
   const [error, setError] = useState<string | null>(null);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [pettyPending, setPettyPending] = useState<Array<Record<string, unknown>>>([]);
+  const [pettyGCashPending, setPettyGCashPending] = useState<Array<Record<string, unknown>>>([]);
   const [inventoryDiscrepancyDates, setInventoryDiscrepancyDates] = useState<Set<string>>(new Set());
   const [savingExpenseId, setSavingExpenseId] = useState<string>("");
   const [deductAccounts, setDeductAccounts] = useState<BankAccount[]>([]);
@@ -98,12 +99,14 @@ export default function CalendarPage() {
       events?: CalendarEvent[];
       inventoryDiscrepancyDates?: string[];
       pettyPending?: Array<Record<string, unknown>>;
+      pettyGCashPending?: Array<Record<string, unknown>>;
       error?: string;
     };
     if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
     setEvents(json.events ?? []);
     setInventoryDiscrepancyDates(new Set((json.inventoryDiscrepancyDates ?? []).filter(Boolean)));
     setPettyPending(Array.isArray(json.pettyPending) ? json.pettyPending : []);
+    setPettyGCashPending(Array.isArray(json.pettyGCashPending) ? json.pettyGCashPending : []);
   }, [year, month]);
 
   useEffect(() => {
@@ -145,8 +148,23 @@ export default function CalendarPage() {
         kind: "pettyCash",
       };
     });
-    return [...events, ...pettyEvents];
-  }, [events, pettyPending]);
+    const pettyGCashEvents: CalendarEvent[] = pettyGCashPending.map((r) => {
+      const id = String(r["id"] ?? "");
+      const date = String(r["dateRequested"] ?? "");
+      return {
+        date,
+        expenseId: `pettyGCash:${id}`,
+        title: String(r["description"] ?? "Petty GCash request"),
+        amount: Number(r["amount"] ?? 0) || 0,
+        category: String(r["category"] ?? "Petty GCash"),
+        departmentName: String(r["employeeName"] ?? "Petty GCash"),
+        frequency: "once",
+        paymentStatus: "unpaid",
+        kind: "pettyGCash",
+      };
+    });
+    return [...events, ...pettyEvents, ...pettyGCashEvents];
+  }, [events, pettyPending, pettyGCashPending]);
 
   const visibleEvents = useMemo(() => {
     return allEvents.filter((ev) => ev.paymentStatus !== "paid");
@@ -211,7 +229,10 @@ export default function CalendarPage() {
     setMonth(d.getMonth() + 1);
   };
 
-  const togglePaid = async (ev: CalendarEvent, deductFrom?: { type: "pettyCash" | "bank"; accountId?: string }) => {
+  const togglePaid = async (
+    ev: CalendarEvent,
+    deductFrom?: { type: "pettyCash" | "pettyGCash" | "bank"; accountId?: string },
+  ) => {
     const next = ev.paymentStatus === "paid" ? "unpaid" : "paid";
     setSavingExpenseId(ev.expenseId);
     setError(null);
@@ -260,6 +281,22 @@ export default function CalendarPage() {
     setError(null);
     try {
       const res = await fetch("/api/admin/petty-cash?action=decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId, action, decidedBy: account?.displayName || "Superadmin" }),
+      });
+      const j = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(j.error ?? `Failed (${res.status})`);
+      await refreshCalendar();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const decidePettyGCash = async (requestId: string, action: "approve" | "reject") => {
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/petty-gcash?action=decide", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requestId, action, decidedBy: account?.displayName || "Superadmin" }),
@@ -413,26 +450,38 @@ export default function CalendarPage() {
                 </div>
                 <div className="text-xs font-bold text-white">{ev.amount ? currency(ev.amount) : ""}</div>
               </div>
-              {ev.kind === "pettyCash" ? (
+              {ev.kind === "pettyCash" || ev.kind === "pettyGCash" ? (
                 <div className="mt-3 flex flex-col gap-2">
                   <div className="text-[10px] font-semibold text-zinc-300">Type</div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-full border border-white/15 bg-white/10 px-1.5 py-0.5 text-[9px] font-bold text-zinc-200">
-                      Petty cash request
+                      {ev.kind === "pettyGCash" ? "Petty GCash request" : "Petty cash request"}
                     </span>
                     {account?.isSuperadmin ? (
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
                           className="admin-btn-primary px-2 py-1 text-[11px]"
-                          onClick={() => void decidePetty(ev.expenseId.replace(/^petty:/, ""), "approve")}
+                          onClick={() => {
+                            if (ev.kind === "pettyGCash") {
+                              void decidePettyGCash(ev.expenseId.replace(/^pettyGCash:/, ""), "approve");
+                            } else {
+                              void decidePetty(ev.expenseId.replace(/^petty:/, ""), "approve");
+                            }
+                          }}
                         >
                           Approve
                         </button>
                         <button
                           type="button"
                           className="admin-btn-secondary px-2 py-1 text-[11px]"
-                          onClick={() => void decidePetty(ev.expenseId.replace(/^petty:/, ""), "reject")}
+                          onClick={() => {
+                            if (ev.kind === "pettyGCash") {
+                              void decidePettyGCash(ev.expenseId.replace(/^pettyGCash:/, ""), "reject");
+                            } else {
+                              void decidePetty(ev.expenseId.replace(/^petty:/, ""), "reject");
+                            }
+                          }}
                         >
                           Reject
                         </button>
@@ -479,6 +528,7 @@ export default function CalendarPage() {
                       >
                         <option value="">Deduct from…</option>
                         <option value="pettyCash">Petty cash</option>
+                        <option value="pettyGCash">Petty GCash</option>
                         {deductAccounts.map((a) => (
                           <option key={a.id} value={`bank:${a.id}`}>
                             {a.name} ({a.bank})
@@ -491,6 +541,7 @@ export default function CalendarPage() {
                         onClick={() => {
                           const v = deductChoiceByExpenseId[ev.expenseId] ?? "";
                           if (v === "pettyCash") void togglePaid(ev, { type: "pettyCash" });
+                          else if (v === "pettyGCash") void togglePaid(ev, { type: "pettyGCash" });
                           else if (v.startsWith("bank:")) void togglePaid(ev, { type: "bank", accountId: v.slice("bank:".length) });
                         }}
                         className={statusChipClass(ev.paymentStatus)}

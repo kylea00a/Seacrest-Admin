@@ -10,6 +10,7 @@ export const runtime = "nodejs";
 type SettingsBody = {
   expenseCategories?: unknown;
   pettyCashCategories?: unknown;
+  pettyGCashCategories?: unknown;
   packages?: unknown;
   products?: unknown;
   productAbbreviations?: unknown;
@@ -111,6 +112,8 @@ export async function POST(req: Request) {
     body.expenseCategories === undefined ? current.expenseCategories : normalizeList(body.expenseCategories);
   const pettyCashCategories =
     body.pettyCashCategories === undefined ? current.pettyCashCategories : normalizeList(body.pettyCashCategories);
+  const pettyGCashCategories =
+    body.pettyGCashCategories === undefined ? current.pettyGCashCategories : normalizeList(body.pettyGCashCategories);
   const packages = body.packages === undefined ? current.packages : normalizePackages(body.packages);
   const products = body.products === undefined ? current.products : normalizeProducts(body.products);
   const allowSuperadminEditEncodedInventory =
@@ -126,6 +129,7 @@ export async function POST(req: Request) {
   const next: AdminSettings = {
     expenseCategories: expenseCategories.length ? expenseCategories : current.expenseCategories,
     pettyCashCategories: pettyCashCategories.length ? pettyCashCategories : current.pettyCashCategories,
+    pettyGCashCategories: pettyGCashCategories.length ? pettyGCashCategories : current.pettyGCashCategories,
     packages: packages.length ? packages : current.packages,
     products: products.length ? products : current.products,
     productAbbreviations: Object.keys(productAbbreviations ?? {}).length ? productAbbreviations : undefined,

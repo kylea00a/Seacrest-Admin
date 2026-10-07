@@ -79,8 +79,8 @@ export interface CalendarEvent {
   departmentName: string;
   frequency: ExpenseFrequency;
   paymentStatus: PaymentStatus;
-  /** bill (expense) vs reminder vs petty cash request shown on calendar */
-  kind?: "bill" | "reminder" | "pettyCash";
+  /** bill (expense) vs reminder vs petty cash / petty GCash request shown on calendar */
+  kind?: "bill" | "reminder" | "pettyCash" | "pettyGCash";
 }
 
 export type TelegramNotificationKind = "calendarReminders" | "calendarExpenses";
@@ -206,6 +206,7 @@ export interface AdminPackageItem {
 export interface AdminSettings {
   expenseCategories: string[];
   pettyCashCategories: string[];
+  pettyGCashCategories: string[];
   packages: AdminPackageItem[];
   products: AdminProductItem[];
   /**
