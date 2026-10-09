@@ -139,10 +139,14 @@ export async function POST(req: Request) {
         if (recurring) return t.date !== ledgerDate;
         return false;
       });
+      const requestDate =
+        (typeof prev.startDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(prev.startDate) ? prev.startDate : undefined) ||
+        ledgerDate;
       file.transactions.unshift({
         id: randomUUID(),
         accountId: deductAccountId,
         date: ledgerDate,
+        requestDate,
         description: desc,
         debit: amt,
         credit: 0,

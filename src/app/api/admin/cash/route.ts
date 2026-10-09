@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { loadCashLedger, saveCashLedger } from "@/data/admin/storage";
 import type { BankAccount, CashTransaction } from "@/data/admin/types";
 import { requireApiAnyPermission, requireApiPermission } from "@/lib/adminApiAuth";
+import { backfillCashLedgerRequestDates } from "@/lib/cashRequestDateBackfill";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -31,6 +32,8 @@ function num(v: unknown): number {
 export async function GET(req: Request) {
   const auth = await requireApiAnyPermission(req, ["pettyCash", "pettyCashEdit", "settings", "salesReport", "calendar", "expenses"]);
   if (auth instanceof NextResponse) return auth;
+  // One-time-ish: fill requestDate on older rows from salesDate / expenses / description.
+  backfillCashLedgerRequestDates();
   const file = loadCashLedger();
   return NextResponse.json(file);
 }
@@ -272,6 +275,7 @@ export async function POST(req: Request) {
         id: randomUUID(),
         accountId: fromAccountId,
         date: nowYmd,
+        requestDate: salesDate,
         description: `${desc} (transfer out)`,
         debit: amount,
         credit: 0,
@@ -286,6 +290,7 @@ export async function POST(req: Request) {
         id: randomUUID(),
         accountId: toAccountId,
         date: nowYmd,
+        requestDate: salesDate,
         description: `${desc} (transfer in)`,
         debit: 0,
         credit: amount,
@@ -311,6 +316,7 @@ export async function POST(req: Request) {
       id: randomUUID(),
       accountId,
       date: nowYmd,
+      requestDate: salesDate,
       description: `${descriptionPrefix}-${salesDate}`,
       debit: 0,
       credit: amount,
