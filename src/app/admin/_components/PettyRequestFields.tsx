@@ -1,7 +1,7 @@
 "use client";
 
 import type { PettyCashRequestType, PettyFundId } from "@/data/admin/types";
-import { PETTY_FUND_IDS, PETTY_FUND_LABELS } from "@/lib/pettyFunds";
+import { PETTY_FUND_IDS, PETTY_FUND_LABELS } from "@/lib/pettyFundConstants";
 
 type Props = {
   /** Fund for the page where the request is filed (source for transfers / cash-out). */

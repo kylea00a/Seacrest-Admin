@@ -10,7 +10,7 @@ import type {
   PettyFundId,
   UserRole,
 } from "@/data/admin/types";
-import { categoryForRequestType, PETTY_FUND_IDS } from "@/lib/pettyFunds";
+import { categoryForRequestType, PETTY_FUND_IDS } from "@/lib/pettyFundConstants";
 import { PettyRequestFields, requestMetaLine, requestTypeApproveLabel } from "../_components/PettyRequestFields";
 import { useAdminSession } from "../AdminSessionContext";
 
