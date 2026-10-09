@@ -141,6 +141,9 @@ export type PettyCashRequestType = "budget" | "cashIn" | "transfer";
 
 export type PettyFundId = "pettyCash" | "pettyGCash" | "pettyWallet";
 
+/** Where a Cash In is funded from (credits the page fund). */
+export type PettyCashInFromType = "cash" | "petty" | "bank";
+
 export interface PettyCashRequest {
   id: string;
   employeeName: string;
@@ -151,11 +154,17 @@ export interface PettyCashRequest {
   dateRequested: string; // YYYY-MM-DD
   /** Budget = cash out; cashIn = add funds; transfer = move to another petty fund. */
   requestType?: PettyCashRequestType;
-  /**
-   * Cash In: fund that receives the credit.
-   * Transfer: destination fund (source is the page/API fund).
-   */
+  /** Transfer: destination fund (source is the page/API fund). */
   targetFund?: PettyFundId;
+  /**
+   * Cash In: funding source.
+   * - cash: physical cash (credit page fund only)
+   * - petty: debit another petty fund
+   * - bank: debit a bank SOA account
+   */
+  cashInFromType?: PettyCashInFromType;
+  cashInFromFund?: PettyFundId;
+  cashInFromAccountId?: string;
   status: PettyCashRequestStatus;
   createdAt: string; // ISO
   decidedAt?: string; // ISO
@@ -362,7 +371,16 @@ export interface CashTransaction {
   credit: number;
   createdAt: string; // ISO
   /** Optional classification for idempotency / UI toggles. */
-  kind?: "sales_deposit" | "jj_sales_deposit" | "seacrest_sales_deposit" | "custom" | "bill_payment" | "bank_transfer";
+  kind?:
+    | "sales_deposit"
+    | "jj_sales_deposit"
+    | "seacrest_sales_deposit"
+    | "custom"
+    | "bill_payment"
+    | "bank_transfer"
+    | "petty_cash_in";
+  /** When kind = petty_cash_in, the petty request id. */
+  pettyRequestId?: string;
   /** When kind = sales_deposit, the sales day being deposited (YYYY-MM-DD). */
   salesDate?: string;
   /** Bank-to-bank transfer: pairs debit (from) and credit (to) legs. */

@@ -55,16 +55,39 @@ export async function handlePettyFundRequest(fundId: PettyFundId, body: Record<s
       : categoryForRequestType(requestType);
 
   let targetFund: PettyFundId | undefined;
-  if (requestType === "cashIn" || requestType === "transfer") {
+  let cashInFromType: PettyCashRequest["cashInFromType"];
+  let cashInFromFund: PettyFundId | undefined;
+  let cashInFromAccountId: string | undefined;
+
+  if (requestType === "transfer") {
     if (!isPettyFundId(body.targetFund)) {
-      return NextResponse.json(
-        { error: requestType === "transfer" ? "Missing `targetFund` (transfer to)." : "Missing `targetFund` (cash in fund)." },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: "Missing `targetFund` (transfer to)." }, { status: 400 });
     }
     targetFund = body.targetFund;
-    if (requestType === "transfer" && targetFund === fundId) {
+    if (targetFund === fundId) {
       return NextResponse.json({ error: "Cannot transfer to the same fund." }, { status: 400 });
+    }
+  }
+
+  if (requestType === "cashIn") {
+    const from = typeof body.cashInFromType === "string" ? body.cashInFromType : "";
+    if (from !== "cash" && from !== "petty" && from !== "bank") {
+      return NextResponse.json({ error: "Missing `cashInFromType` (cash|petty|bank)." }, { status: 400 });
+    }
+    cashInFromType = from;
+    if (from === "petty") {
+      if (!isPettyFundId(body.cashInFromFund)) {
+        return NextResponse.json({ error: "Missing `cashInFromFund`." }, { status: 400 });
+      }
+      if (body.cashInFromFund === fundId) {
+        return NextResponse.json({ error: "Cash in source cannot be the same fund." }, { status: 400 });
+      }
+      cashInFromFund = body.cashInFromFund;
+    }
+    if (from === "bank") {
+      const accountId = typeof body.cashInFromAccountId === "string" ? body.cashInFromAccountId.trim() : "";
+      if (!accountId) return NextResponse.json({ error: "Missing `cashInFromAccountId`." }, { status: 400 });
+      cashInFromAccountId = accountId;
     }
   }
 
@@ -93,6 +116,9 @@ export async function handlePettyFundRequest(fundId: PettyFundId, body: Record<s
     dateRequested,
     requestType,
     targetFund,
+    cashInFromType,
+    cashInFromFund,
+    cashInFromAccountId,
     status: "pending",
     createdAt: new Date().toISOString(),
   };

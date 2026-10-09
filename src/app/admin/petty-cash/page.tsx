@@ -11,7 +11,7 @@ import type {
   UserRole,
 } from "@/data/admin/types";
 import { categoryForRequestType, PETTY_FUND_IDS } from "@/lib/pettyFundConstants";
-import { PettyRequestFields, requestMetaLine, requestTypeApproveLabel } from "../_components/PettyRequestFields";
+import { PettyRequestFields, requestMetaLine, requestTypeApproveLabel, type CashInFromValue } from "../_components/PettyRequestFields";
 import { useAdminSession } from "../AdminSessionContext";
 
 const SOURCE_FUND: PettyFundId = "pettyCash";
@@ -54,14 +54,17 @@ export default function PettyCashPage() {
   const [amount, setAmount] = useState("");
   const [dateRequested, setDateRequested] = useState(todayISO());
   const [requestType, setRequestType] = useState<PettyCashRequestType>("budget");
-  const [targetFund, setTargetFund] = useState<PettyFundId>(SOURCE_FUND);
+  const [targetFund, setTargetFund] = useState<PettyFundId>(
+    PETTY_FUND_IDS.find((id) => id !== SOURCE_FUND) ?? "pettyGCash",
+  );
+  const [cashInFrom, setCashInFrom] = useState<CashInFromValue>({ type: "cash" });
 
   const setRequestTypeAndTarget = (t: PettyCashRequestType) => {
     setRequestType(t);
     if (t === "transfer") {
       setTargetFund(PETTY_FUND_IDS.find((id) => id !== SOURCE_FUND) ?? "pettyGCash");
     } else if (t === "cashIn") {
-      setTargetFund(SOURCE_FUND);
+      setCashInFrom({ type: "cash" });
     }
   };
 
@@ -120,6 +123,12 @@ export default function PettyCashPage() {
     if (requestType === "transfer" && targetFund === SOURCE_FUND) {
       return setError("Choose a different fund to transfer to.");
     }
+    if (requestType === "cashIn" && cashInFrom.type === "petty" && cashInFrom.fundId === SOURCE_FUND) {
+      return setError("Choose a different petty fund as the cash-in source.");
+    }
+    if (requestType === "cashIn" && cashInFrom.type === "bank" && !cashInFrom.accountId) {
+      return setError("Choose a bank account.");
+    }
 
     const res = await fetch("/api/admin/petty-cash?action=request", {
       method: "POST",
@@ -131,7 +140,10 @@ export default function PettyCashPage() {
         amount: amt,
         dateRequested,
         requestType,
-        targetFund: requestType === "cashIn" || requestType === "transfer" ? targetFund : undefined,
+        targetFund: requestType === "transfer" ? targetFund : undefined,
+        cashInFromType: requestType === "cashIn" ? cashInFrom.type : undefined,
+        cashInFromFund: requestType === "cashIn" && cashInFrom.type === "petty" ? cashInFrom.fundId : undefined,
+        cashInFromAccountId: requestType === "cashIn" && cashInFrom.type === "bank" ? cashInFrom.accountId : undefined,
       }),
     });
     const json = (await res.json()) as { request?: PettyCashRequest; state?: PettyCashState; error?: string; availableBalance?: number };
@@ -387,6 +399,8 @@ export default function PettyCashPage() {
               onRequestTypeChange={setRequestTypeAndTarget}
               targetFund={targetFund}
               onTargetFundChange={setTargetFund}
+              cashInFrom={cashInFrom}
+              onCashInFromChange={setCashInFrom}
               dateRequested={dateRequested}
               onDateRequestedChange={setDateRequested}
               description={description}
