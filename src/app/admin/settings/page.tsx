@@ -22,6 +22,7 @@ export default function SettingsPage() {
   const [newExpenseCategory, setNewExpenseCategory] = useState("");
   const [newPettyCategory, setNewPettyCategory] = useState("");
   const [newPettyGCashCategory, setNewPettyGCashCategory] = useState("");
+  const [newPettyWalletCategory, setNewPettyWalletCategory] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -50,6 +51,7 @@ export default function SettingsPage() {
     expenseCategories?: string[];
     pettyCashCategories?: string[];
     pettyGCashCategories?: string[];
+    pettyWalletCategories?: string[];
     allowSuperadminEditEncodedInventory?: boolean;
     productAbbreviations?: Record<string, string>;
   }) => {
@@ -74,6 +76,7 @@ export default function SettingsPage() {
   const expenseList = useMemo(() => uniq(settings?.expenseCategories ?? []), [settings?.expenseCategories]);
   const pettyList = useMemo(() => uniq(settings?.pettyCashCategories ?? []), [settings?.pettyCashCategories]);
   const pettyGCashList = useMemo(() => uniq(settings?.pettyGCashCategories ?? []), [settings?.pettyGCashCategories]);
+  const pettyWalletList = useMemo(() => uniq(settings?.pettyWalletCategories ?? []), [settings?.pettyWalletCategories]);
 
   const addExpense = async () => {
     const v = newExpenseCategory.trim();
@@ -106,6 +109,17 @@ export default function SettingsPage() {
 
   const removePettyGCash = async (value: string) => {
     await save({ pettyGCashCategories: uniq((settings?.pettyGCashCategories ?? []).filter((c) => c !== value)) });
+  };
+
+  const addPettyWallet = async () => {
+    const v = newPettyWalletCategory.trim();
+    if (!v) return;
+    setNewPettyWalletCategory("");
+    await save({ pettyWalletCategories: uniq([...(settings?.pettyWalletCategories ?? []), v]) });
+  };
+
+  const removePettyWallet = async (value: string) => {
+    await save({ pettyWalletCategories: uniq((settings?.pettyWalletCategories ?? []).filter((c) => c !== value)) });
   };
 
   const [abbrDraft, setAbbrDraft] = useState<Record<string, string>>({});
@@ -187,7 +201,7 @@ export default function SettingsPage() {
       <div className="admin-card">
         <h1 className="admin-title">Settings</h1>
         <div className="text-sm text-zinc-300">
-          Manage dropdown categories for Expenses, Petty Cash, and Petty GCash.
+          Manage dropdown categories for Expenses, Petty Cash, Petty GCash, and Petty Wallet.
         </div>
 
         {loading ? (
@@ -406,6 +420,50 @@ export default function SettingsPage() {
                   <button
                     type="button"
                     onClick={() => removePettyGCash(c)}
+                    disabled={saving}
+                    className="rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-[10px] font-bold text-zinc-200 hover:bg-white/10 disabled:opacity-60"
+                    aria-label={`Remove ${c}`}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold">Petty Wallet Categories</div>
+                <div className="mt-1 text-xs text-zinc-400">Used in `/admin/petty-wallet` dropdown.</div>
+              </div>
+              <div className="text-xs text-zinc-400">{pettyWalletList.length} items</div>
+            </div>
+
+            <div className="mt-3 flex gap-2">
+              <input
+                value={newPettyWalletCategory}
+                onChange={(e) => setNewPettyWalletCategory(e.target.value)}
+                className="flex-1 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-emerald-500/60"
+                placeholder="Add a category (e.g., Transportation)"
+              />
+              <button
+                type="button"
+                onClick={addPettyWallet}
+                disabled={saving}
+                className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 hover:bg-emerald-400 disabled:opacity-60"
+              >
+                Add
+              </button>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              {pettyWalletList.map((c) => (
+                <div key={c} className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-zinc-200">
+                  <span>{c}</span>
+                  <button
+                    type="button"
+                    onClick={() => removePettyWallet(c)}
                     disabled={saving}
                     className="rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-[10px] font-bold text-zinc-200 hover:bg-white/10 disabled:opacity-60"
                     aria-label={`Remove ${c}`}

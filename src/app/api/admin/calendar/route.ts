@@ -5,6 +5,7 @@ import {
   loadInventoryEnding,
   loadPettyCashRequests,
   loadPettyGCashRequests,
+  loadPettyWalletRequests,
   loadReminders,
 } from "@/data/admin/storage";
 import { buildCalendarEventsForMonth } from "@/data/admin/calendar";
@@ -32,6 +33,7 @@ export async function GET(req: Request) {
   const reminders = loadReminders();
   const petty = loadPettyCashRequests();
   const pettyGCash = loadPettyGCashRequests();
+  const pettyWallet = loadPettyWalletRequests();
 
   const monthStart = new Date(year, month - 1, 1);
   const { events, monthStart: monthStartISO, monthEnd } = buildCalendarEventsForMonth({
@@ -51,6 +53,11 @@ export async function GET(req: Request) {
     .filter((r) => r.dateRequested >= monthStartISO && r.dateRequested <= monthEnd)
     .sort((a, b) => a.dateRequested.localeCompare(b.dateRequested));
 
+  const pettyWalletPending = pettyWallet
+    .filter((r) => r.status === "pending")
+    .filter((r) => r.dateRequested >= monthStartISO && r.dateRequested <= monthEnd)
+    .sort((a, b) => a.dateRequested.localeCompare(b.dateRequested));
+
   const inv = loadInventoryEnding();
   const inventoryDiscrepancyDates = Object.values(inv.byDate ?? {})
     .filter((r) => Boolean(r?.hasDiscrepancy))
@@ -65,6 +72,7 @@ export async function GET(req: Request) {
     inventoryDiscrepancyDates,
     pettyPending,
     pettyGCashPending,
+    pettyWalletPending,
   });
 }
 

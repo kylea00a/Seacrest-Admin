@@ -66,6 +66,7 @@ export default function CalendarPage() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [pettyPending, setPettyPending] = useState<Array<Record<string, unknown>>>([]);
   const [pettyGCashPending, setPettyGCashPending] = useState<Array<Record<string, unknown>>>([]);
+  const [pettyWalletPending, setPettyWalletPending] = useState<Array<Record<string, unknown>>>([]);
   const [inventoryDiscrepancyDates, setInventoryDiscrepancyDates] = useState<Set<string>>(new Set());
   const [savingExpenseId, setSavingExpenseId] = useState<string>("");
   const [deductAccounts, setDeductAccounts] = useState<BankAccount[]>([]);
@@ -100,6 +101,7 @@ export default function CalendarPage() {
       inventoryDiscrepancyDates?: string[];
       pettyPending?: Array<Record<string, unknown>>;
       pettyGCashPending?: Array<Record<string, unknown>>;
+      pettyWalletPending?: Array<Record<string, unknown>>;
       error?: string;
     };
     if (!res.ok) throw new Error(json.error ?? `Failed with status ${res.status}`);
@@ -107,6 +109,7 @@ export default function CalendarPage() {
     setInventoryDiscrepancyDates(new Set((json.inventoryDiscrepancyDates ?? []).filter(Boolean)));
     setPettyPending(Array.isArray(json.pettyPending) ? json.pettyPending : []);
     setPettyGCashPending(Array.isArray(json.pettyGCashPending) ? json.pettyGCashPending : []);
+    setPettyWalletPending(Array.isArray(json.pettyWalletPending) ? json.pettyWalletPending : []);
   }, [year, month]);
 
   useEffect(() => {
@@ -163,8 +166,23 @@ export default function CalendarPage() {
         kind: "pettyGCash",
       };
     });
-    return [...events, ...pettyEvents, ...pettyGCashEvents];
-  }, [events, pettyPending, pettyGCashPending]);
+    const pettyWalletEvents: CalendarEvent[] = pettyWalletPending.map((r) => {
+      const id = String(r["id"] ?? "");
+      const date = String(r["dateRequested"] ?? "");
+      return {
+        date,
+        expenseId: `pettyWallet:${id}`,
+        title: String(r["description"] ?? "Petty Wallet request"),
+        amount: Number(r["amount"] ?? 0) || 0,
+        category: String(r["category"] ?? "Petty Wallet"),
+        departmentName: String(r["employeeName"] ?? "Petty Wallet"),
+        frequency: "once",
+        paymentStatus: "unpaid",
+        kind: "pettyWallet",
+      };
+    });
+    return [...events, ...pettyEvents, ...pettyGCashEvents, ...pettyWalletEvents];
+  }, [events, pettyPending, pettyGCashPending, pettyWalletPending]);
 
   const visibleEvents = useMemo(() => {
     return allEvents.filter((ev) => ev.paymentStatus !== "paid");
@@ -231,7 +249,7 @@ export default function CalendarPage() {
 
   const togglePaid = async (
     ev: CalendarEvent,
-    deductFrom?: { type: "pettyCash" | "pettyGCash" | "bank"; accountId?: string },
+    deductFrom?: { type: "pettyCash" | "pettyGCash" | "pettyWallet" | "bank"; accountId?: string },
   ) => {
     const next = ev.paymentStatus === "paid" ? "unpaid" : "paid";
     setSavingExpenseId(ev.expenseId);
@@ -297,6 +315,22 @@ export default function CalendarPage() {
     setError(null);
     try {
       const res = await fetch("/api/admin/petty-gcash?action=decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId, action, decidedBy: account?.displayName || "Superadmin" }),
+      });
+      const j = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(j.error ?? `Failed (${res.status})`);
+      await refreshCalendar();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const decidePettyWallet = async (requestId: string, action: "approve" | "reject") => {
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/petty-wallet?action=decide", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requestId, action, decidedBy: account?.displayName || "Superadmin" }),
@@ -450,12 +484,16 @@ export default function CalendarPage() {
                 </div>
                 <div className="text-xs font-bold text-white">{ev.amount ? currency(ev.amount) : ""}</div>
               </div>
-              {ev.kind === "pettyCash" || ev.kind === "pettyGCash" ? (
+              {ev.kind === "pettyCash" || ev.kind === "pettyGCash" || ev.kind === "pettyWallet" ? (
                 <div className="mt-3 flex flex-col gap-2">
                   <div className="text-[10px] font-semibold text-zinc-300">Type</div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-full border border-white/15 bg-white/10 px-1.5 py-0.5 text-[9px] font-bold text-zinc-200">
-                      {ev.kind === "pettyGCash" ? "Petty GCash request" : "Petty cash request"}
+                      {ev.kind === "pettyWallet"
+                        ? "Petty Wallet request"
+                        : ev.kind === "pettyGCash"
+                          ? "Petty GCash request"
+                          : "Petty cash request"}
                     </span>
                     {account?.isSuperadmin ? (
                       <div className="flex items-center gap-2">
@@ -463,7 +501,9 @@ export default function CalendarPage() {
                           type="button"
                           className="admin-btn-primary px-2 py-1 text-[11px]"
                           onClick={() => {
-                            if (ev.kind === "pettyGCash") {
+                            if (ev.kind === "pettyWallet") {
+                              void decidePettyWallet(ev.expenseId.replace(/^pettyWallet:/, ""), "approve");
+                            } else if (ev.kind === "pettyGCash") {
                               void decidePettyGCash(ev.expenseId.replace(/^pettyGCash:/, ""), "approve");
                             } else {
                               void decidePetty(ev.expenseId.replace(/^petty:/, ""), "approve");
@@ -476,7 +516,9 @@ export default function CalendarPage() {
                           type="button"
                           className="admin-btn-secondary px-2 py-1 text-[11px]"
                           onClick={() => {
-                            if (ev.kind === "pettyGCash") {
+                            if (ev.kind === "pettyWallet") {
+                              void decidePettyWallet(ev.expenseId.replace(/^pettyWallet:/, ""), "reject");
+                            } else if (ev.kind === "pettyGCash") {
                               void decidePettyGCash(ev.expenseId.replace(/^pettyGCash:/, ""), "reject");
                             } else {
                               void decidePetty(ev.expenseId.replace(/^petty:/, ""), "reject");
@@ -529,6 +571,7 @@ export default function CalendarPage() {
                         <option value="">Deduct from…</option>
                         <option value="pettyCash">Petty cash</option>
                         <option value="pettyGCash">Petty GCash</option>
+                        <option value="pettyWallet">Petty Wallet</option>
                         {deductAccounts.map((a) => (
                           <option key={a.id} value={`bank:${a.id}`}>
                             {a.name} ({a.bank})
@@ -542,6 +585,7 @@ export default function CalendarPage() {
                           const v = deductChoiceByExpenseId[ev.expenseId] ?? "";
                           if (v === "pettyCash") void togglePaid(ev, { type: "pettyCash" });
                           else if (v === "pettyGCash") void togglePaid(ev, { type: "pettyGCash" });
+                          else if (v === "pettyWallet") void togglePaid(ev, { type: "pettyWallet" });
                           else if (v.startsWith("bank:")) void togglePaid(ev, { type: "bank", accountId: v.slice("bank:".length) });
                         }}
                         className={statusChipClass(ev.paymentStatus)}

@@ -11,6 +11,7 @@ type SettingsBody = {
   expenseCategories?: unknown;
   pettyCashCategories?: unknown;
   pettyGCashCategories?: unknown;
+  pettyWalletCategories?: unknown;
   packages?: unknown;
   products?: unknown;
   productAbbreviations?: unknown;
@@ -114,6 +115,8 @@ export async function POST(req: Request) {
     body.pettyCashCategories === undefined ? current.pettyCashCategories : normalizeList(body.pettyCashCategories);
   const pettyGCashCategories =
     body.pettyGCashCategories === undefined ? current.pettyGCashCategories : normalizeList(body.pettyGCashCategories);
+  const pettyWalletCategories =
+    body.pettyWalletCategories === undefined ? current.pettyWalletCategories : normalizeList(body.pettyWalletCategories);
   const packages = body.packages === undefined ? current.packages : normalizePackages(body.packages);
   const products = body.products === undefined ? current.products : normalizeProducts(body.products);
   const allowSuperadminEditEncodedInventory =
@@ -130,6 +133,7 @@ export async function POST(req: Request) {
     expenseCategories: expenseCategories.length ? expenseCategories : current.expenseCategories,
     pettyCashCategories: pettyCashCategories.length ? pettyCashCategories : current.pettyCashCategories,
     pettyGCashCategories: pettyGCashCategories.length ? pettyGCashCategories : current.pettyGCashCategories,
+    pettyWalletCategories: pettyWalletCategories.length ? pettyWalletCategories : current.pettyWalletCategories,
     packages: packages.length ? packages : current.packages,
     products: products.length ? products : current.products,
     productAbbreviations: Object.keys(productAbbreviations ?? {}).length ? productAbbreviations : undefined,

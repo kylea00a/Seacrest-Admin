@@ -4,12 +4,15 @@ import {
   loadExpenses,
   loadPettyCashLedger,
   loadPettyGCashLedger,
+  loadPettyWalletLedger,
   saveCashLedger,
   saveExpenses,
   savePettyCashLedger,
   savePettyCashState,
   savePettyGCashLedger,
   savePettyGCashState,
+  savePettyWalletLedger,
+  savePettyWalletState,
 } from "@/data/admin/storage";
 import type { PaymentStatus, PettyCashLedgerTransaction } from "@/data/admin/types";
 import { isRecurringExpenseFrequency } from "@/data/admin/recurrence";
@@ -104,9 +107,14 @@ export async function POST(req: Request) {
   const deductAccountId = typeof deduct?.accountId === "string" ? (deduct.accountId as string).trim() : "";
 
   if (desiredStatus === "paid") {
-    if (deductType !== "pettyCash" && deductType !== "pettyGCash" && deductType !== "bank") {
+    if (
+      deductType !== "pettyCash" &&
+      deductType !== "pettyGCash" &&
+      deductType !== "pettyWallet" &&
+      deductType !== "bank"
+    ) {
       return NextResponse.json(
-        { error: "Missing `deductFrom` (pettyCash|pettyGCash|bank) when marking paid." },
+        { error: "Missing `deductFrom` (pettyCash|pettyGCash|pettyWallet|bank) when marking paid." },
         { status: 400 },
       );
     }
@@ -166,6 +174,29 @@ export async function POST(req: Request) {
       savePettyGCashLedger(nextLedger);
       const bal = nextLedger.reduce((acc, t) => acc + (t.credit ?? 0) - (t.debit ?? 0), 0);
       savePettyGCashState({ balance: bal, updatedAt: now.toISOString() });
+    } else if (deductType === "pettyWallet") {
+      const ledger = loadPettyWalletLedger();
+      const nextLedger = ledger.filter((t) => {
+        if (t.kind !== "bill_payment" || t.expenseId !== expenseId) return true;
+        if (recurring) return t.date !== ledgerDate;
+        return false;
+      });
+      const tx: PettyCashLedgerTransaction = {
+        id: randomUUID(),
+        date: ledgerDate,
+        description: desc,
+        debit: amt,
+        credit: 0,
+        kind: "bill_payment",
+        expenseId,
+        createdAt: now.toISOString(),
+        approvedAt: now.toISOString(),
+        approvedBy: auth.displayName ?? "Superadmin",
+      };
+      nextLedger.push(tx);
+      savePettyWalletLedger(nextLedger);
+      const bal = nextLedger.reduce((acc, t) => acc + (t.credit ?? 0) - (t.debit ?? 0), 0);
+      savePettyWalletState({ balance: bal, updatedAt: now.toISOString() });
     } else {
       const ledger = loadPettyCashLedger();
       const nextLedger = ledger.filter((t) => {
