@@ -136,17 +136,26 @@ export interface Reminder {
 
 export type PettyCashRequestStatus = "pending" | "approved" | "rejected";
 
-export type PettyCashRequestType = "budget" | "cashIn";
+/** Cash Out (budget), Cash In, or Transfer between petty funds. */
+export type PettyCashRequestType = "budget" | "cashIn" | "transfer";
+
+export type PettyFundId = "pettyCash" | "pettyGCash" | "pettyWallet";
 
 export interface PettyCashRequest {
   id: string;
   employeeName: string;
-  category: string; // e.g. Miscellaneous
+  /** Cash In | Cash Out | Transfer */
+  category: string;
   description: string; // e.g. Battery
   amount: number;
   dateRequested: string; // YYYY-MM-DD
-  /** Budget = cash out; cashIn = cash added to petty cash. */
+  /** Budget = cash out; cashIn = add funds; transfer = move to another petty fund. */
   requestType?: PettyCashRequestType;
+  /**
+   * Cash In: fund that receives the credit.
+   * Transfer: destination fund (source is the page/API fund).
+   */
+  targetFund?: PettyFundId;
   status: PettyCashRequestStatus;
   createdAt: string; // ISO
   decidedAt?: string; // ISO
@@ -158,7 +167,13 @@ export interface PettyCashState {
   updatedAt: string; // ISO
 }
 
-export type PettyCashLedgerKind = "budget_out" | "cash_in" | "bill_payment" | "adjustment";
+export type PettyCashLedgerKind =
+  | "budget_out"
+  | "cash_in"
+  | "bill_payment"
+  | "adjustment"
+  | "transfer_out"
+  | "transfer_in";
 
 export interface PettyCashLedgerTransaction {
   id: string;

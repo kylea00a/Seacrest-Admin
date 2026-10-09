@@ -5,10 +5,16 @@ import type {
   AdminSettings,
   PettyCashLedgerTransaction,
   PettyCashRequest,
+  PettyCashRequestType,
   PettyCashState,
+  PettyFundId,
   UserRole,
 } from "@/data/admin/types";
+import { categoryForRequestType, PETTY_FUND_IDS } from "@/lib/pettyFunds";
+import { PettyRequestFields, requestMetaLine, requestTypeApproveLabel } from "../_components/PettyRequestFields";
 import { useAdminSession } from "../AdminSessionContext";
+
+const SOURCE_FUND: PettyFundId = "pettyCash";
 
 function todayISO() {
   const d = new Date();
@@ -44,11 +50,20 @@ export default function PettyCashPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [category, setCategory] = useState("Miscellaneous");
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [dateRequested, setDateRequested] = useState(todayISO());
-  const [requestType, setRequestType] = useState<"budget" | "cashIn">("budget");
+  const [requestType, setRequestType] = useState<PettyCashRequestType>("budget");
+  const [targetFund, setTargetFund] = useState<PettyFundId>(SOURCE_FUND);
+
+  const setRequestTypeAndTarget = (t: PettyCashRequestType) => {
+    setRequestType(t);
+    if (t === "transfer") {
+      setTargetFund(PETTY_FUND_IDS.find((id) => id !== SOURCE_FUND) ?? "pettyGCash");
+    } else if (t === "cashIn") {
+      setTargetFund(SOURCE_FUND);
+    }
+  };
 
   const [balanceInput, setBalanceInput] = useState<string>("0");
   const availableBalance = state?.balance ?? 0;
@@ -99,8 +114,11 @@ export default function PettyCashPage() {
     const amt = Number(amount);
     if (!description.trim()) return setError("Description is required.");
     if (!Number.isFinite(amt) || amt <= 0) return setError("Amount must be greater than 0.");
-    if (requestType === "budget" && amt > availableBalance) {
+    if ((requestType === "budget" || requestType === "transfer") && amt > availableBalance) {
       return setError(`Insufficient balance. Available: ${currency(availableBalance)}`);
+    }
+    if (requestType === "transfer" && targetFund === SOURCE_FUND) {
+      return setError("Choose a different fund to transfer to.");
     }
 
     const res = await fetch("/api/admin/petty-cash?action=request", {
@@ -108,11 +126,12 @@ export default function PettyCashPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         employeeName: employeeName.trim() || "Employee",
-        category: category.trim(),
+        category: categoryForRequestType(requestType),
         description: description.trim(),
         amount: amt,
         dateRequested,
         requestType,
+        targetFund: requestType === "cashIn" || requestType === "transfer" ? targetFund : undefined,
       }),
     });
     const json = (await res.json()) as { request?: PettyCashRequest; state?: PettyCashState; error?: string; availableBalance?: number };
@@ -310,17 +329,6 @@ export default function PettyCashPage() {
     }
   };
 
-  const pettyCategories = useMemo(() => {
-    const list = settings?.pettyCashCategories?.length ? settings.pettyCashCategories : ["Miscellaneous"];
-    return Array.from(new Set(list.map((s) => s.trim()).filter(Boolean)));
-  }, [settings]);
-
-  useEffect(() => {
-    if (!pettyCategories.length) return;
-    if (!pettyCategories.includes(category)) setCategory(pettyCategories[0]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pettyCategories.join("|")]);
-
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_420px]">
       <div className="admin-card">
@@ -373,72 +381,21 @@ export default function PettyCashPage() {
           <form onSubmit={createRequest} className="mt-6 space-y-4">
             <div className="text-sm font-semibold">Request</div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="text-sm font-semibold">Type</label>
-                <select
-                  value={requestType}
-                  onChange={(e) => setRequestType(e.target.value as "budget" | "cashIn")}
-                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500/60"
-                  required
-                >
-                  <option value="budget">Budget (Cash Out)</option>
-                  <option value="cashIn">Cash In</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-sm font-semibold">Category</label>
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500/60"
-                  required
-                >
-                  {pettyCategories.map((c) => (
-                    <option value={c} key={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-sm font-semibold">Date requested</label>
-                <input
-                  type="date"
-                  value={dateRequested}
-                  onChange={(e) => setDateRequested(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="sm:col-span-1">
-                <label className="text-sm font-semibold">Description</label>
-                <input
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
-                  placeholder="Battery"
-                  required
-                />
-              </div>
-              <div className="sm:col-span-1">
-                <label className="text-sm font-semibold">Amount</label>
-                <input
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  inputMode="decimal"
-                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
-                  placeholder="180"
-                  required
-                />
-                <div className="mt-1 text-xs text-zinc-400">
-                  {requestType === "budget" ? <>Available: {currency(availableBalance)}</> : "Adds to petty cash once approved."}
-                </div>
-              </div>
-            </div>
+            <PettyRequestFields
+              sourceFund={SOURCE_FUND}
+              requestType={requestType}
+              onRequestTypeChange={setRequestTypeAndTarget}
+              targetFund={targetFund}
+              onTargetFundChange={setTargetFund}
+              dateRequested={dateRequested}
+              onDateRequestedChange={setDateRequested}
+              description={description}
+              onDescriptionChange={setDescription}
+              amount={amount}
+              onAmountChange={setAmount}
+              availableBalance={availableBalance}
+              currency={currency}
+            />
 
             <button
               type="submit"
@@ -493,9 +450,7 @@ export default function PettyCashPage() {
                           <div className="text-sm font-bold text-white">
                             {r.description} — {currency(r.amount)}
                           </div>
-                          <div className="mt-1 text-xs text-zinc-300">
-                            {r.category} • {r.employeeName} • Requested {r.dateRequested}
-                          </div>
+                          <div className="mt-1 text-xs text-zinc-300">{requestMetaLine(r)}</div>
                         </div>
                         <span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${pill(r.status)}`}>
                           {r.status.toUpperCase()}
@@ -508,7 +463,7 @@ export default function PettyCashPage() {
                           onClick={() => decide(r.id, "approve")}
                           className="rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400"
                         >
-                          Approve ({(r.requestType ?? "budget") === "cashIn" ? "cash in" : "deduct"})
+                          Approve ({requestTypeApproveLabel(r)})
                         </button>
                         <button
                           type="button"
