@@ -364,8 +364,10 @@ export interface BankAccount {
 export interface CashTransaction {
   id: string;
   accountId: string;
-  /** YYYY-MM-DD */
+  /** YYYY-MM-DD — ledger / posting date */
   date: string;
+  /** YYYY-MM-DD — when the item was requested (optional; shown after Date in SOA) */
+  requestDate?: string;
   description: string;
   debit: number;
   credit: number;

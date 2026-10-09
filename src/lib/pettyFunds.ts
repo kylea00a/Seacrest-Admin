@@ -191,6 +191,7 @@ export function applyApprovedPettyRequest(opts: {
         id: newTxnId(),
         accountId,
         date: decidedDay,
+        ...(request.dateRequested ? { requestDate: request.dateRequested } : {}),
         description: `${desc} → ${PETTY_FUND_LABELS[sourceFund]} (petty cash in)`,
         debit: amount,
         credit: 0,

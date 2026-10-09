@@ -103,11 +103,15 @@ export async function POST(req: Request) {
   if (action === "addTransaction") {
     const accountId = typeof body.accountId === "string" ? body.accountId.trim() : "";
     const date = typeof body.date === "string" ? body.date.trim() : "";
+    const requestDateRaw = typeof body.requestDate === "string" ? body.requestDate.trim() : "";
     const description = typeof body.description === "string" ? body.description.trim() : "";
     const side = typeof body.side === "string" ? body.side : "";
     const amount = num(body.amount);
     if (!accountId) return NextResponse.json({ error: "Missing `accountId`." }, { status: 400 });
     if (!isDateOnly(date)) return NextResponse.json({ error: "Missing/invalid `date` (YYYY-MM-DD)." }, { status: 400 });
+    if (requestDateRaw && !isDateOnly(requestDateRaw)) {
+      return NextResponse.json({ error: "Invalid `requestDate` (YYYY-MM-DD)." }, { status: 400 });
+    }
     if (!description) return NextResponse.json({ error: "Missing `description`." }, { status: 400 });
     if (!Number.isFinite(amount) || amount <= 0) return NextResponse.json({ error: "Invalid `amount`." }, { status: 400 });
     if (side !== "debit" && side !== "credit") {
@@ -120,6 +124,7 @@ export async function POST(req: Request) {
       id: randomUUID(),
       accountId,
       date,
+      ...(requestDateRaw ? { requestDate: requestDateRaw } : {}),
       description,
       debit: side === "debit" ? amount : 0,
       credit: side === "credit" ? amount : 0,
@@ -135,6 +140,7 @@ export async function POST(req: Request) {
     const fromAccountId = typeof body.fromAccountId === "string" ? body.fromAccountId.trim() : "";
     const toAccountId = typeof body.toAccountId === "string" ? body.toAccountId.trim() : "";
     const date = typeof body.date === "string" ? body.date.trim() : "";
+    const requestDateRaw = typeof body.requestDate === "string" ? body.requestDate.trim() : "";
     const amount = num(body.amount);
     const note = typeof body.description === "string" ? body.description.trim() : "";
 
@@ -145,6 +151,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "From and to accounts must be different." }, { status: 400 });
     }
     if (!isDateOnly(date)) return NextResponse.json({ error: "Missing/invalid `date` (YYYY-MM-DD)." }, { status: 400 });
+    if (requestDateRaw && !isDateOnly(requestDateRaw)) {
+      return NextResponse.json({ error: "Invalid `requestDate` (YYYY-MM-DD)." }, { status: 400 });
+    }
     if (!Number.isFinite(amount) || amount <= 0) return NextResponse.json({ error: "Invalid `amount`." }, { status: 400 });
 
     const fromAcc = file.accounts.find((a) => a.id === fromAccountId);
@@ -154,10 +163,12 @@ export async function POST(req: Request) {
 
     const pairId = randomUUID();
     const baseDesc = note || `Transfer to ${toAcc.name}`;
+    const requestDateField = requestDateRaw ? { requestDate: requestDateRaw } : {};
     const debitTx: CashTransaction = {
       id: randomUUID(),
       accountId: fromAccountId,
       date,
+      ...requestDateField,
       description: `${baseDesc} (transfer out)`,
       debit: amount,
       credit: 0,
@@ -170,6 +181,7 @@ export async function POST(req: Request) {
       id: randomUUID(),
       accountId: toAccountId,
       date,
+      ...requestDateField,
       description: `${note || `Transfer from ${fromAcc.name}`} (transfer in)`,
       debit: 0,
       credit: amount,

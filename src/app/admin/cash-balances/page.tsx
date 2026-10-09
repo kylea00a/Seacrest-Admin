@@ -37,15 +37,18 @@ export default function CashBalancesPage() {
 
   const todayYmd = useMemo(() => format(startOfDay(new Date()), "yyyy-MM-dd"), []);
   const [customDate, setCustomDate] = useState(todayYmd);
+  const [customRequestDate, setCustomRequestDate] = useState(todayYmd);
   const [customSide, setCustomSide] = useState<"credit" | "debit">("credit");
   const [customAmount, setCustomAmount] = useState("");
   const [customDesc, setCustomDesc] = useState("");
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string>("");
+  const [exporting, setExporting] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferFromId, setTransferFromId] = useState("");
   const [transferToId, setTransferToId] = useState("");
   const [transferDate, setTransferDate] = useState(todayYmd);
+  const [transferRequestDate, setTransferRequestDate] = useState(todayYmd);
   const [transferAmount, setTransferAmount] = useState("");
   const [transferNote, setTransferNote] = useState("");
   const [transferring, setTransferring] = useState(false);
@@ -78,7 +81,7 @@ export default function CashBalancesPage() {
     const q = soaSearch.trim().toLowerCase();
     const matched = q
       ? list.filter((t) => {
-          const hay = `${t.description ?? ""} ${t.date ?? ""} ${t.kind ?? ""} ${t.debit ?? ""} ${t.credit ?? ""}`.toLowerCase();
+          const hay = `${t.description ?? ""} ${t.date ?? ""} ${t.requestDate ?? ""} ${t.kind ?? ""} ${t.debit ?? ""} ${t.credit ?? ""}`.toLowerCase();
           return hay.includes(q);
         })
       : list;
@@ -156,6 +159,7 @@ export default function CashBalancesPage() {
           action: "addTransaction",
           accountId,
           date: customDate,
+          ...(customRequestDate ? { requestDate: customRequestDate } : {}),
           side: customSide,
           amount: customAmt,
           description: customDesc.trim(),
@@ -221,10 +225,52 @@ export default function CashBalancesPage() {
     setTransferFromId(accountId);
     setTransferToId(others[0]?.id ?? "");
     setTransferDate(todayYmd);
+    setTransferRequestDate(todayYmd);
     setTransferAmount("");
     setTransferNote("");
     setTransferOpen(true);
     setError(null);
+  };
+
+  const exportSoa = async () => {
+    if (!accountId || filtered.length === 0) {
+      setError("No SOA rows to export for this account.");
+      return;
+    }
+    setExporting(true);
+    setError(null);
+    try {
+      const chronological = [...filtered].sort(
+        (a, b) => a.date.localeCompare(b.date) || (a.createdAt ?? "").localeCompare(b.createdAt ?? ""),
+      );
+      const { buildCashBalancesSoaWorkbookBuffer } = await import("@/lib/cashBalancesSoaExport");
+      const buf = await buildCashBalancesSoaWorkbookBuffer(
+        chronological.map((t) => ({
+          date: t.date,
+          requestDate: t.requestDate,
+          description: t.description,
+          debit: t.debit ?? 0,
+          credit: t.credit ?? 0,
+          runningBalance: balanceByTxnId.get(t.id) ?? 0,
+        })),
+        accountLabel(accountId),
+        soaSearch.trim() ? `search: ${soaSearch.trim()}` : "all",
+      );
+      const blob = new Blob([buf], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const safeName = accountLabel(accountId).replace(/[^\w.-]+/g, "_").slice(0, 40);
+      a.download = `cash-balances-soa-${safeName}-${todayYmd}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExporting(false);
+    }
   };
 
   const submitTransfer = async () => {
@@ -245,6 +291,7 @@ export default function CashBalancesPage() {
           fromAccountId: transferFromId,
           toAccountId: transferToId,
           date: transferDate,
+          ...(transferRequestDate ? { requestDate: transferRequestDate } : {}),
           amount: amt,
           ...(transferNote.trim() ? { description: transferNote.trim() } : {}),
         }),
@@ -330,6 +377,15 @@ export default function CashBalancesPage() {
               />
             </div>
             <div>
+              <div className="text-xs font-semibold text-zinc-400">Request date</div>
+              <input
+                type="date"
+                value={customRequestDate}
+                onChange={(e) => setCustomRequestDate(e.target.value)}
+                className="admin-input mt-1"
+              />
+            </div>
+            <div>
               <div className="text-xs font-semibold text-zinc-400">Side</div>
               <select
                 value={customSide}
@@ -404,6 +460,15 @@ export default function CashBalancesPage() {
                 Clear
               </button>
             ) : null}
+            <button
+              type="button"
+              className="admin-btn-secondary px-2 py-1.5 text-xs"
+              disabled={exporting || loading || !accountId || filtered.length === 0}
+              title="Export filtered SOA rows to Excel"
+              onClick={() => void exportSoa()}
+            >
+              {exporting ? "Exporting…" : "Export Excel"}
+            </button>
             <span>Rows</span>
             <select value={rowsPerPage} onChange={(e) => setRowsPerPage(Number(e.target.value) as 25 | 50 | 100)} className="admin-select py-1 text-xs">
               <option value={25}>25</option>
@@ -427,6 +492,7 @@ export default function CashBalancesPage() {
             <thead className="bg-black/30 text-zinc-300">
               <tr>
                 <th className="px-3 py-2 text-left whitespace-nowrap">Date</th>
+                <th className="px-3 py-2 text-left whitespace-nowrap">Request date</th>
                 <th className="px-3 py-2 text-left">Description</th>
                 <th className="px-3 py-2 text-right whitespace-nowrap">Debit</th>
                 <th className="px-3 py-2 text-right whitespace-nowrap">Credit</th>
@@ -437,7 +503,7 @@ export default function CashBalancesPage() {
             <tbody className="divide-y divide-white/10">
               {visible.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-4 text-zinc-500" colSpan={canDelete ? 6 : 5}>
+                  <td className="px-3 py-4 text-zinc-500" colSpan={canDelete ? 7 : 6}>
                     {soaSearch.trim() ? "No transactions match this search." : "No transactions yet."}
                   </td>
                 </tr>
@@ -445,6 +511,7 @@ export default function CashBalancesPage() {
                 visible.map((t) => (
                   <tr key={t.id} className="bg-black/10 text-zinc-100">
                     <td className="px-3 py-2 whitespace-nowrap text-zinc-300">{t.date}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-zinc-300">{t.requestDate ?? ""}</td>
                     <td className="px-3 py-2">{t.description}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-rose-300/90">{t.debit ? currency(t.debit) : ""}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-emerald-300/90">{t.credit ? currency(t.credit) : ""}</td>
@@ -495,6 +562,17 @@ export default function CashBalancesPage() {
                 type="date"
                 value={transferDate}
                 onChange={(e) => setTransferDate(e.target.value)}
+                className="admin-input mt-1 w-full"
+                disabled={transferring}
+              />
+            </label>
+
+            <label className="mt-3 block text-xs font-semibold text-zinc-400">
+              Request date
+              <input
+                type="date"
+                value={transferRequestDate}
+                onChange={(e) => setTransferRequestDate(e.target.value)}
                 className="admin-input mt-1 w-full"
                 disabled={transferring}
               />
